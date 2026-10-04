@@ -30,6 +30,17 @@ FetchContent_MakeAvailable(imgui)
 
 add_library(ControllerSupport SHARED
         ControllerSupport/ControllerSupport.cpp
+        ControllerSupport/Game.cpp
+        ControllerSupport/Camera.cpp
+        ControllerSupport/Input.cpp
+        ControllerSupport/Targeting.cpp
+        ControllerSupport/Safety.cpp
+        ControllerSupport/Panels.cpp
+        ControllerSupport/Skills.cpp
+        ControllerSupport/Loadouts.cpp
+        ControllerSupport/EditMode.cpp
+        ControllerSupport/Cast.cpp
+        ControllerSupport/Overlay.cpp
         ControllerSupport/resources.rc
         ${nosboost_modkit_SOURCE_DIR}/WidgetKit/WidgetKit.cpp
         ${imgui_SOURCE_DIR}/imgui.cpp
