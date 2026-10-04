@@ -154,24 +154,25 @@ namespace ControllerSupport::Overlay {
             for (int cell = 0; cell < 8; cell++) {
                 SlotView& slot = panel->slots[cell];
                 if (!slot.icon || !slot.icon->image || !slot.icon->isVisible) continue;
+                if (Bindings[layer][cell].kind == ItemKind) continue;
                 if (!IsBarSkill(Bindings[layer][cell].action)) {
                     ShowEntryCooldown(slot, now);
                     continue;
                 }
                 const uintptr_t record = reinterpret_cast<uintptr_t>(slot.icon->image);
-                if (!slot.source || !IsClass(slot.source, "TNTTimeAniIcon")
-                    || reinterpret_cast<uintptr_t>(slot.source->image) != record) {
-                    slot.source = SkillWindowIcon(root, record);
-                }
                 const TNTTimeAniIcon* source = slot.source;
-                if (!source) continue;
+                if (!source || !IsClass(source, "TNTTimeAniIcon") || reinterpret_cast<uintptr_t>(source->image) != record) continue;
                 TNTTimeAniIcon* icon = slot.icon;
                 const auto* sourceFlags = reinterpret_cast<const uint8_t*>(&source->flags);
                 auto* iconFlags = reinterpret_cast<uint8_t*>(&icon->flags);
                 // startTick is really the last update tick, so bring the cooldown up to now.
                 const uint32_t elapsed = source->elapsedMs + (now - source->startTick);
                 const bool running = sourceFlags[3] != 0 && elapsed < source->cooldownMs;
-                if (running) {
+                const uint32_t start = now - elapsed;
+                const bool restarted = !slot.cooling || static_cast<int32_t>(start - slot.cooldownStart) > 100
+                    || static_cast<int32_t>(slot.cooldownStart - start) > 100;
+                if (running && restarted) {
+                    slot.cooldownStart = start;
                     icon->cooldownMs = source->cooldownMs;
                     icon->elapsedMs = elapsed;
                     icon->startTick = now;
@@ -185,9 +186,10 @@ namespace ControllerSupport::Overlay {
                         if (!label->isVisible) label->isVisible = true;
                     }
                     slot.cooling = true;
-                } else if (slot.cooling) {
+                } else if (!running && slot.cooling) {
                     StopCooldown(icon);
                     slot.cooling = false;
+                    slot.cooldownStart = 0;
                 }
             }
         }
@@ -236,7 +238,8 @@ namespace ControllerSupport::Overlay {
     TNTTimeAniIcon* BarIcon(const TLBSWidget* root, const uint8_t action) {
         const bool pet = action <= PetSkill3;
         const TLBSWidget* bar = FindWidgetOfClass(root, pet ? "TNTPetSKillSlotWidget" : "TNTPartnerSlotWidget", 1);
-        if (!bar || !bar->childrenList || !bar->childrenList->list) return nullptr;
+        // The game hides this bar while the pet or partner is away, its icons keep old skills.
+        if (!bar || !bar->isVisible || !bar->childrenList || !bar->childrenList->list) return nullptr;
         int wanted = action - (pet ? PetSkill1 : PartnerSkill1);
         for (uint32_t i = 0; i < bar->childrenList->count; i++) {
             TLBSWidget* child = bar->childrenList->list[i];
@@ -260,21 +263,68 @@ namespace ControllerSupport::Overlay {
     }
 
     // The game rebuilds skill entries when the list changes, so find them again by tab and id.
+    int16_t ItemId(const uintptr_t record) {
+        const uintptr_t data = record ? *reinterpret_cast<const uintptr_t*>(record + 0x08) : 0;
+        return data ? static_cast<int16_t>(*reinterpret_cast<const int32_t*>(data)) : 0;
+    }
+
+    TLBSWidget* InventoryWindow(const TLBSWidget* root) {
+        return FindWidgetOfClass(root, "TNTCharacterInventoryInfoWidget", 1);
+    }
+
+    const uint8_t* InventoryIcon(const TLBSWidget* root) {
+        const TLBSWidget* window = InventoryWindow(root);
+        if (!window || !window->childrenList || !window->childrenList->list) return nullptr;
+        for (uint32_t i = 0; i < window->childrenList->count; i++) {
+            const TLBSWidget* child = window->childrenList->list[i];
+            if (IsClass(child, "TNTIconWidget")) return reinterpret_cast<const uint8_t*>(child);
+        }
+        return nullptr;
+    }
+
+    const uint8_t* InventoryItem(const TLBSWidget* root, const int16_t tab, const int16_t slot) {
+        const TLBSWidget* window = InventoryWindow(root);
+        if (!window) return nullptr;
+        const auto* bytes = reinterpret_cast<const uint8_t*>(window);
+        for (uint32_t offset = 0x228; offset <= 0x230; offset += 4) {
+            const auto* list = *reinterpret_cast<const uint8_t* const*>(bytes + offset);
+            if (!IsClass(reinterpret_cast<const TLBSWidget*>(list), "TNTItemList")) continue;
+            const auto* items = *reinterpret_cast<const uint8_t* const* const*>(list + 4);
+            const int32_t count = *reinterpret_cast<const int32_t*>(list + 8);
+            for (int32_t i = 0; items && i < count; i++) {
+                const uint8_t* item = items[i];
+                if (item && *reinterpret_cast<const int16_t*>(item + 6) == tab && *reinterpret_cast<const int16_t*>(item + 8) == slot) {
+                    return ItemId(*reinterpret_cast<const uintptr_t*>(item)) ? item : nullptr;
+                }
+            }
+        }
+        return nullptr;
+    }
+
+    // Handlers come from the skill window or inventory, never from the game's hotbar.
     bool ResolveSkill(const TLBSWidget* root, Binding& binding, SlotView& slot) {
-        const uint8_t* item = SkillItem(root, binding.tab, binding.index);
-        if (!item) {
+        const bool isItem = binding.kind == ItemKind;
+        const uint8_t* item = isItem ? InventoryItem(root, binding.tab, binding.index) : SkillItem(root, binding.tab, binding.index);
+        const auto* model = isItem ? InventoryIcon(root) : reinterpret_cast<const uint8_t*>(SkillWindowIcon(root, 0));
+        if (!item || !model) {
             slot.missing = true;
             return false;
         }
         slot.missing = false;
         uint8_t* fields = binding.fields + (0xB0 - BindingFirst);
-        if (std::memcmp(fields, item, 0xBC - 0xB0) == 0
-            && slot.icon && std::memcmp(reinterpret_cast<uint8_t*>(slot.icon) + 0xB0, item, 0xBC - 0xB0) == 0) {
+        uint8_t* handlers = binding.fields + (0x98 - BindingFirst);
+        auto* icon = reinterpret_cast<uint8_t*>(slot.icon);
+        if (std::memcmp(fields, item, 0xBC - 0xB0) == 0 && std::memcmp(handlers, model + 0x98, 0xB0 - 0x98) == 0
+            && icon && std::memcmp(icon + 0xB0, item, 0xBC - 0xB0) == 0 && std::memcmp(icon + 0x98, model + 0x98, 0xB0 - 0x98) == 0) {
             return true;
         }
         std::memcpy(fields, item, 0xBC - 0xB0);
-        if (slot.icon) {
-            std::memcpy(reinterpret_cast<uint8_t*>(slot.icon) + 0xB0, item, 0xBC - 0xB0);
+        std::memcpy(handlers, model + 0x98, 0xB0 - 0x98);
+        std::memcpy(binding.fields, model + BindingFirst, 0x74 - BindingFirst);
+        if (icon) {
+            std::memcpy(icon + 0xB0, item, 0xBC - 0xB0);
+            std::memcpy(icon + 0x98, model + 0x98, 0xB0 - 0x98);
+            std::memcpy(icon + BindingFirst, model + BindingFirst, 0x74 - BindingFirst);
             StopCooldown(slot.icon);
         }
         slot.source = nullptr;

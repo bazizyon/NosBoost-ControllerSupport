@@ -20,13 +20,15 @@ namespace ControllerSupport::Overlay {
                 std::memcpy(DragFields, source + BindingFirst, 0xA8 - BindingFirst);
             }
         } else if (WasDragging) {
-            for (int layer = 0; layer < LayerCount; layer++) {
+            const uint8_t kind = DragFields[0xB4 - BindingFirst];
+            for (int layer = 0; layer < LayerCount && (kind == SkillKind || kind == ItemKind); layer++) {
                 for (int i = 0; i < 8; i++) {
                     if (!Contains(Panels[layer].slots[i].rect, mouseX, mouseY)) continue;
                     Binding& binding = Bindings[layer][i];
                     binding = {};
                     binding.set = true;
                     std::memcpy(binding.fields, DragFields, BindingSize);
+                    binding.kind = kind;
                     binding.tab = *reinterpret_cast<int16_t*>(DragFields + (0xB6 - BindingFirst));
                     binding.index = *reinterpret_cast<int16_t*>(DragFields + (0xB8 - BindingFirst));
                     ApplyBinding(Panels[layer].slots[i], binding);

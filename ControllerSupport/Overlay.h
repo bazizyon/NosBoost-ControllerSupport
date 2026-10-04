@@ -114,9 +114,12 @@ namespace ControllerSupport::Overlay {
         bool set = false;
         uint8_t action = NoAction;
         uint8_t fields[BindingSize]{};
+        uint8_t kind = 0;
         int16_t tab = 0;
         int16_t index = 0;
     };
+    constexpr uint8_t ItemKind = 2;
+    constexpr uint8_t SkillKind = 3;
     enum Layer { Base, RB, LT, RT, LB, LTRT, LayerCount };
     inline Binding Bindings[LayerCount][8];
 
@@ -185,7 +188,8 @@ namespace ControllerSupport::Overlay {
     void SyncCooldowns(const TLBSWidget* root);
 
     inline std::string CharacterName;
-    inline int Morph = 0;
+    inline int Morph = -1;
+    inline int LoadoutSkill = 0;
     inline bool LoadPending = false;
     inline uint32_t LoadDeadline = 0;
 
@@ -205,7 +209,8 @@ namespace ControllerSupport::Overlay {
     void ApplyDefaults();
     bool LoadBindings(const TLBSWidget* root);
     void RequestLoad();
-    void TrackCharacter();
+    int FirstSkill(const TLBSWidget* root);
+    void TrackCharacter(const TLBSWidget* root);
     void UpdateLoad(const TLBSWidget* root);
 
     inline bool WasDragging = false;
@@ -267,6 +272,10 @@ namespace ControllerSupport::Overlay {
 
     TNTTimeAniIcon* BarIcon(const TLBSWidget* root, const uint8_t action);
     uintptr_t CopyBarSkill(TNTTimeAniIcon* icon, const TNTTimeAniIcon* source, const bool interactable);
+    int16_t ItemId(uintptr_t record);
+    TLBSWidget* InventoryWindow(const TLBSWidget* root);
+    const uint8_t* InventoryIcon(const TLBSWidget* root);
+    const uint8_t* InventoryItem(const TLBSWidget* root, int16_t tab, int16_t slot);
     bool ResolveSkill(const TLBSWidget* root, Binding& binding, SlotView& slot);
     void ResolveSkills(const TLBSWidget* root);
     void ShowBarSkills(const TLBSWidget* root);

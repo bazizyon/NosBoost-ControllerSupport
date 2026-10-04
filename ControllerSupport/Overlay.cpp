@@ -40,7 +40,7 @@ namespace ControllerSupport::Overlay {
                 BuildEditBoard(root);
             }
         }
-        TrackCharacter();
+        TrackCharacter(root);
         UpdateLoad(root);
         StepCast();
         ResolveSkills(root);

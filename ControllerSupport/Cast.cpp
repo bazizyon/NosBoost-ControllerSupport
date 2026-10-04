@@ -12,6 +12,10 @@ namespace ControllerSupport::Overlay {
         Binding& binding = Bindings[layer][cell];
         if (!binding.set || (binding.action && !(IsBarSkill(binding.action) && slot.barRecord)) || !slot.icon || !panel.shown) return false;
         if (!binding.action && !ResolveSkill(AttachedRoot, binding, slot)) return false;
+        if (IsBarSkill(binding.action)) {
+            const TNTTimeAniIcon* source = BarIcon(AttachedRoot, binding.action);
+            if (!source || reinterpret_cast<uintptr_t>(source->image) != slot.barRecord) return false;
+        }
         if (Casting.active) return true;
         HWND window = FindGameWindow();
         if (!window) return false;
