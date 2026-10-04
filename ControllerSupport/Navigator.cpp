@@ -85,6 +85,10 @@ namespace ControllerSupport::Navigator {
             CollectWindow(child, found);
             if (!found.empty()) windows.push_back(child);
         }
+        std::ranges::stable_sort(windows, [](const TLBSWidget* a, const TLBSWidget* b) {
+            const int ax = a->rect.left + a->rect.right, bx = b->rect.left + b->rect.right;
+            return ax != bx ? ax < bx : a->rect.top + a->rect.bottom < b->rect.top + b->rect.bottom;
+        });
         return windows;
     }
 
@@ -229,6 +233,92 @@ namespace ControllerSupport::Navigator {
         CursorSaved = false;
     }
 
+    struct Hint {
+        const char* glyphs[2];
+        const wchar_t* text;
+        int16_t width;
+    };
+    constexpr Hint Hints[] = {
+        {{"XBOX_DPAD_SMALL", "XBOX_STICK_L_SMALL"}, L"Move", 32}, {{"XBOX_STICK_R_SMALL", nullptr}, L"Cursor", 36},
+        {{"XBOX_BUTTON_COLOR_A_SMALL", nullptr}, L"Left click", 51}, {{"XBOX_BUTTON_COLOR_B_SMALL", nullptr}, L"Escape", 40},
+        {{"XBOX_BUTTON_COLOR_X_SMALL", nullptr}, L"Right click", 56}, {{"XBOX_BUTTON_COLOR_Y_SMALL", nullptr}, L"Enter", 32},
+        {{"XBOX_LB_SMALL", "XBOX_RB_SMALL"}, L"Switch", 39}, {{"XBOX_BUTTON_VIEW_SMALL", nullptr}, L"Exit", 22},
+    };
+    Overlay::Image HintGlyphs[std::size(Hints)][2];
+
+    TEWCustomPanelWidget* AddBoard(TLBSWidget* parent, const int16_t width, const int16_t height) {
+        auto* board = Widget::Create<TEWCustomPanelWidget>(CachedHost);
+        if (!board || !Overlay::SlotImage.id) return board;
+        constexpr int16_t C = 10;
+        const int16_t S = static_cast<int16_t>(Overlay::SlotImage.width);
+        const int16_t M = static_cast<int16_t>(S - 2 * C);
+        delete[] board->imageData.atlasFrames;
+        board->imageData.imageName = Overlay::SlotImage.id;
+        board->imageData.imageWidth = S;
+        board->imageData.imageHeight = static_cast<int16_t>(Overlay::SlotImage.height);
+        board->imageData.frameCount = 9;
+        board->imageData.atlasFrames = new AtlasFrame[9]{
+            {C, C, M, M}, {0, 0, C, C}, {C, 0, M, C}, {static_cast<int16_t>(S - C), 0, C, C},
+            {static_cast<int16_t>(S - C), C, C, M}, {static_cast<int16_t>(S - C), static_cast<int16_t>(S - C), C, C},
+            {C, static_cast<int16_t>(S - C), M, C}, {0, static_cast<int16_t>(S - C), C, C}, {0, C, C, M},
+        };
+        const uint16_t middleWidth = static_cast<uint16_t>(width - 2 * C);
+        const uint16_t middleHeight = static_cast<uint16_t>(height - 2 * C);
+        board->nineSliceInfo = {middleWidth, middleHeight, static_cast<uint16_t>(C + middleWidth),
+                                static_cast<uint16_t>(C + middleHeight), C, C, C, C};
+        board->sliceCount = 1;
+        board->drawMode = 5;
+        board->isMoveable = false;
+        board->isInteractable = false;
+        board->color = Color(215, 255, 255, 255);
+        board->rect = {0, 0, width, height};
+        Overlay::Attach(parent, board);
+        return board;
+    }
+
+    void BuildLegend(TLBSWidget* root) {
+        Overlay::LoadImages();
+        constexpr int16_t Glyph = 28, Gap = 6, Space = 16, Pad = 12, Height = 40;
+        int16_t width = Pad;
+        int16_t labels[std::size(Hints)]{};
+        for (size_t i = 0; i < std::size(Hints); i++) {
+            for (int g = 0; g < 2; g++) {
+                if (Hints[i].glyphs[g] && !HintGlyphs[i][g].id) HintGlyphs[i][g] = Overlay::Load(Hints[i].glyphs[g]);
+                if (Hints[i].glyphs[g]) width = static_cast<int16_t>(width + Glyph);
+            }
+            labels[i] = Hints[i].width;
+            width = static_cast<int16_t>(width + Gap + labels[i] + Space);
+        }
+        width = static_cast<int16_t>(width - Space + Pad);
+        auto* legend = Widget::Create<TLBSWidget>(CachedHost);
+        if (!legend) return;
+        const int16_t left = static_cast<int16_t>((root->rect.right - root->rect.left - width) / 2);
+        const int16_t top = static_cast<int16_t>(root->rect.bottom - root->rect.top - Height - 70);
+        legend->rect = {left, top, static_cast<int16_t>(left + width), static_cast<int16_t>(top + Height)};
+        legend->isVisible = false;
+        Overlay::Attach(root, legend);
+        AddBoard(legend, width, Height);
+        int16_t x = Pad;
+        for (size_t i = 0; i < std::size(Hints); i++) {
+            for (int g = 0; g < 2; g++) {
+                if (!Hints[i].glyphs[g]) continue;
+                Overlay::AddImage(legend, HintGlyphs[i][g], x, static_cast<int16_t>((Height - Glyph) / 2));
+                x = static_cast<int16_t>(x + Glyph);
+            }
+            x = static_cast<int16_t>(x + Gap);
+            if (TEWLabel* label = Overlay::AddLabel(legend, x, 14, labels[i], 1, Hints[i].text)) label->isInteractable = false;
+            x = static_cast<int16_t>(x + labels[i] + Space);
+        }
+        Legend = legend;
+    }
+
+    void ShowLegend(TLBSWidget* root, const bool shown) {
+        if (shown && !Legend) BuildLegend(root);
+        if (!Legend) return;
+        if (Legend->isVisible != shown) Legend->isVisible = shown;
+        if (shown) KeepOnTop(root, Legend);
+    }
+
     void Select(TLBSWidget* root, const Target* target) {
         Selected = target ? target->widget : nullptr;
         SelectedRect = target ? target->rect : Rect{};
@@ -261,6 +351,7 @@ namespace ControllerSupport::Navigator {
             Close();
             return false;
         }
+        ShowLegend(root, true);
         Targets.clear();
         CollectWindow(window, Targets);
         if (window != Window) {
@@ -410,6 +501,7 @@ namespace ControllerSupport::Navigator {
         PointerTick = 0;
         PointerShown = {-1, -1};
         PressPending = false;
+        if (Legend && Legend->isVisible) Legend->isVisible = false;
         if (restoreCursor) RestoreCursor();
         CursorSaved = false;
         Window = nullptr;
@@ -427,6 +519,8 @@ namespace ControllerSupport::Navigator {
             piece = nullptr;
         }
         PointerShown = {-1, -1};
+        if (Legend) Overlay::Detach(Legend);
+        Legend = nullptr;
         FrameRoot = nullptr;
         FrameAround = {};
     }

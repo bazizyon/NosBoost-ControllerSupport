@@ -32,6 +32,7 @@ namespace ControllerSupport::Navigator {
     inline bool PressPending = false;
     inline DWORD PressTick = 0;
     inline Rect PressRect{};
+    inline TLBSWidget* Legend = nullptr;
     inline std::vector<TLBSWidget*> ShownBefore;
 
     bool Update(TLBSWidget* root, const XINPUT_GAMEPAD& pad);
