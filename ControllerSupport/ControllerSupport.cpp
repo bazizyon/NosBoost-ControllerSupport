@@ -781,9 +781,25 @@ namespace {
     }
 
     namespace Overlay {
-        constexpr int GameUiImage = 1593835569;
-        constexpr AtlasFrame PetFollowFrame{368, 24, 27, 25};
-        constexpr AtlasFrame PetStayFrame{394, 24, 25, 25};
+        struct Sprite {
+            int image;
+            int16_t imageSize;
+            AtlasFrame frame;
+            int16_t width;
+            int16_t height;
+        };
+        constexpr Sprite AttackSprite{1593835568, 512, {161, 91, 30, 30}, 34, 34};
+        constexpr Sprite ClearSprite{1593835782, 256, {204, 2, 30, 29}, 32, 31};
+        constexpr Sprite PrevSprite{1593835585, 512, {476, 50, 11, 17}, 18, 28};
+        constexpr Sprite NextSprite{1593835585, 512, {496, 50, 11, 17}, 18, 28};
+        constexpr Sprite BossSprite{1593835574, 512, {432, 23, 56, 56}, 36, 36};
+        constexpr Sprite SpecialistSprite{1593835617, 512, {307, 53, 30, 30}, 34, 34};
+        constexpr Sprite PartnerSprite{1593835617, 512, {444, 53, 28, 29}, 32, 33};
+        constexpr Sprite PetFollowSprite{1593835569, 512, {368, 24, 27, 25}, 27, 25};
+        constexpr Sprite PetStaySprite{1593835569, 512, {394, 24, 25, 25}, 25, 25};
+        constexpr Sprite ChatSprite{1593835576, 512, {426, 0, 23, 20}, 30, 26};
+        constexpr int16_t RestMotion = 1;
+        constexpr int16_t PickUpMotion = 2;
         constexpr int16_t SlotSize = 56;
         constexpr int16_t Step = 62;
         constexpr int16_t CrossGap = 2 * Step + 150;
@@ -822,24 +838,52 @@ namespace {
 
         enum Action : uint8_t {
             NoAction, Attack, ClearTarget, NextTarget, PrevTarget, BossTarget, PickUp, Sit, Specialist,
-            PartnerSpecialist, PetsFollow, PetsStop, Chat, ActionCount
+            PartnerSpecialist, PetsFollow, PetsStop, Chat, PetSkill1, PetSkill2, PetSkill3, PartnerSkill1, PartnerSkill2,
+            PartnerSkill3, ActionCount
         };
         struct ActionLook {
             const wchar_t* text;
-            const AtlasFrame* icon;
+            const Sprite* sprite;
+            int16_t motion;
+            const wchar_t* caption;
         };
         constexpr ActionLook Actions[ActionCount] = {
-            {L"", nullptr}, {L"Attack", nullptr}, {L"Clear", nullptr}, {L"Next", nullptr}, {L"Prev", nullptr},
-            {L"Boss", nullptr}, {L"Pick up", nullptr}, {L"Sit", nullptr}, {L"SP", nullptr}, {L"PSP", nullptr},
-            {L"", &PetFollowFrame}, {L"", &PetStayFrame}, {L"Chat", nullptr},
+            {L"", nullptr, 0, L""},
+            {L"Attack", &AttackSprite, 0, L""},
+            {L"Clear", &ClearSprite, 0, L""},
+            {L"Next", &NextSprite, 0, L""},
+            {L"Prev", &PrevSprite, 0, L""},
+            {L"Boss", &BossSprite, 0, L""},
+            {L"Pick up", nullptr, PickUpMotion, L""},
+            {L"Sit", nullptr, RestMotion, L""},
+            {L"SP", &SpecialistSprite, 0, L""},
+            {L"Partner", &PartnerSprite, 0, L"Partner"},
+            {L"Pets", &PetFollowSprite, 0, L""},
+            {L"Stay", &PetStaySprite, 0, L""},
+            {L"Chat", &ChatSprite, 0, L""},
+            {L"Pet 1", nullptr, 0, L""},
+            {L"Pet 2", nullptr, 0, L""},
+            {L"Pet 3", nullptr, 0, L""},
+            {L"Partner 1", nullptr, 0, L""},
+            {L"Partner 2", nullptr, 0, L""},
+            {L"Partner 3", nullptr, 0, L""},
         };
+
+        bool IsBarSkill(const uint8_t action) {
+            return action >= PetSkill1 && action <= PartnerSkill3;
+        }
 
         struct SlotView {
             Rect rect{};
             TEWLabel* text = nullptr;
-            TEWControlWidget* actionIcon = nullptr;
+            TEWLabel* caption = nullptr;
+            TEWCustomPanelWidget* actionIcon = nullptr;
             TNTTimeAniIcon* icon = nullptr;
             TNTTimeAniIcon* source = nullptr;
+            int16_t motion = 0;
+            uintptr_t barRecord = 0;
+            uint32_t cooldownStart = 0;
+            bool missing = false;
             bool cooling = false;
         };
 
@@ -855,7 +899,7 @@ namespace {
             bool set = false;
             uint8_t action = NoAction;
             uint8_t fields[BindingSize]{};
-            int16_t kind = 0;
+            int16_t tab = 0;
             int16_t index = 0;
         };
         enum Layer { Base, RB, LT, RT, LB, LTRT, LayerCount };
@@ -931,19 +975,44 @@ namespace {
                              x, y, static_cast<int16_t>(image.width), static_cast<int16_t>(image.height));
         }
 
+        void PlacePicture(TEWCustomPanelWidget* picture, const Sprite& sprite, const int16_t left, const int16_t top,
+                          const bool captioned) {
+            picture->imageData.imageName = sprite.image;
+            picture->imageData.imageWidth = sprite.imageSize;
+            picture->imageData.imageHeight = sprite.imageSize;
+            picture->imageData.atlasFrames[0] = sprite.frame;
+            const int16_t x = static_cast<int16_t>(left + (SlotSize - sprite.width) / 2);
+            const int16_t y = static_cast<int16_t>(top + (SlotSize - sprite.height) / 2 + (captioned ? -4 : 4));
+            picture->rect = {x, y, static_cast<int16_t>(x + sprite.width), static_cast<int16_t>(y + sprite.height)};
+        }
+
+        TEWCustomPanelWidget* AddPicture(TLBSWidget* parent, const Sprite& sprite, const int16_t left, const int16_t top,
+                                         const bool captioned) {
+            auto* picture = Widget::Create<TEWCustomPanelWidget>(CachedHost);
+            if (!picture) return nullptr;
+            delete[] picture->imageData.atlasFrames;
+            picture->imageData.frameCount = 1;
+            picture->imageData.atlasFrames = new AtlasFrame[1]{sprite.frame};
+            picture->drawMode = 0;
+            picture->isMoveable = false;
+            picture->isInteractable = false;
+            PlacePicture(picture, sprite, left, top, captioned);
+            Attach(parent, picture);
+            return picture;
+        }
+
         void StopCooldown(TNTTimeAniIcon* icon);
         void SaveBindings();
 
         void ApplyBinding(SlotView& slot, const Binding& binding) {
             const ActionLook& look = Actions[binding.set ? binding.action : NoAction];
             if (slot.text) slot.text->SetText(look.text);
-            if (slot.actionIcon && look.icon) {
-                slot.actionIcon->imageData.atlasFrames[0] = *look.icon;
-                const int16_t x = static_cast<int16_t>(-GlyphOffset + (SlotSize - look.icon->width) / 2);
-                const int16_t y = static_cast<int16_t>(-GlyphOffset + (SlotSize - look.icon->height) / 2 + 4);
-                slot.actionIcon->rect = {x, y, static_cast<int16_t>(x + look.icon->width), static_cast<int16_t>(y + look.icon->height)};
-            }
+            if (slot.caption) slot.caption->SetText(look.caption);
+            if (slot.actionIcon && look.sprite) PlacePicture(slot.actionIcon, *look.sprite, -GlyphOffset, -GlyphOffset, look.caption[0]);
+            slot.motion = 0;
+            slot.barRecord = 0;
             if (!slot.icon || !binding.set || binding.action) return;
+            static_cast<TLBSWidget*>(slot.icon)->isInteractable = true;
             auto* bytes = reinterpret_cast<uint8_t*>(slot.icon);
             // Never copy 0x78..0x97, it's mouse state from the drag and makes hovering start a drag.
             std::memcpy(bytes + 0x70, binding.fields + (0x70 - BindingFirst), 0x78 - 0x70);
@@ -1023,7 +1092,7 @@ namespace {
                 constexpr int16_t In = -GlyphOffset;
                 SlotRefs[layer][i] = {layer, i};
                 AddSquareButton(group, In, In, &OnSlotClick, &SlotRefs[layer][i]);
-                slot.actionIcon = AddSprite(group, GameUiImage, PetFollowFrame, In, In);
+                slot.actionIcon = AddPicture(group, PetFollowSprite, In, In, false);
                 if (slot.actionIcon) slot.actionIcon->isVisible = false;
                 slot.text = AddLabel(group, In - 8, In + SlotSize / 2 - 2, SlotSize + 16, 3, L"");
                 if (auto* icon = Widget::Create<TNTTimeAniIcon>(CachedHost)) {
@@ -1035,6 +1104,8 @@ namespace {
                     Attach(group, icon);
                     slot.icon = icon;
                 }
+                slot.caption = AddLabel(group, In - 8, In + SlotSize - 22, SlotSize + 16, 3, L"");
+                if (slot.caption) slot.caption->isVisible = false;
                 ApplyBinding(slot, bindings[i]);
                 AddImage(group, CellGlyphs[i], 0, 0);
             }
@@ -1056,12 +1127,15 @@ namespace {
         }
 
         void ShowSlot(SlotView& slot, const Binding& binding) {
-            const bool skill = binding.set && !binding.action;
+            const bool skill = binding.set && !binding.action && !slot.missing;
             const bool action = binding.set && binding.action;
-            const bool actionHasIcon = action && Actions[binding.action].icon;
-            SetShown(slot.icon, skill);
-            SetShown(slot.actionIcon, actionHasIcon);
-            SetShown(slot.text, action && !actionHasIcon);
+            const ActionLook& look = Actions[action ? binding.action : NoAction];
+            const bool motion = action && ((look.motion && slot.motion == look.motion) || (IsBarSkill(binding.action) && slot.barRecord));
+            const bool pictured = action && look.sprite;
+            SetShown(slot.icon, skill || motion);
+            SetShown(slot.actionIcon, pictured);
+            SetShown(slot.caption, action && look.caption[0]);
+            SetShown(slot.text, action && !pictured && !motion);
         }
 
         void Show(Panel& panel, const bool shown, const Binding (&bindings)[8]) {
@@ -1140,6 +1214,46 @@ namespace {
             }
         }
 
+        uintptr_t SetLengthFn = 0;
+        uintptr_t SetRunningFn = 0;
+
+        uintptr_t FindSetLength() {
+            if (!SetLengthFn) {
+                const uint8_t Pattern[] = {0x51, 0x83, 0xFA, 0x01, 0x7C, 0, 0x8B, 0xCA, 0x89, 0x88, 0x14, 0x01, 0x00, 0x00,
+                                           0x3B, 0x88, 0x0C, 0x01, 0x00, 0x00};
+                SetLengthFn = FindPattern(Pattern, "xxxxx?xxxxxxxxxxxxxx", nullptr, 0);
+            }
+            return SetLengthFn;
+        }
+
+        uintptr_t FindSetRunning() {
+            if (!SetRunningFn) {
+                const uint8_t Pattern[] = {0x53, 0x8B, 0xD8, 0x8B, 0xC2, 0x88, 0x83, 0x1F, 0x01, 0x00, 0x00, 0x84, 0xC0, 0x74, 0, 0xE8};
+                SetRunningFn = FindPattern(Pattern, "xxxxxxxxxxxxxx?x", nullptr, 0);
+            }
+            return SetRunningFn;
+        }
+
+        __declspec(noinline) void SetLength(TNTTimeAniIcon* icon, int milliseconds) {
+            if (!GameCallsAllowed || !FindSetLength()) return;
+            uintptr_t function = SetLengthFn;
+            _asm {
+                mov eax, icon
+                mov edx, milliseconds
+                call function
+            }
+        }
+
+        __declspec(noinline) void SetRunning(TNTTimeAniIcon* icon, int running) {
+            if (!GameCallsAllowed || !FindSetRunning()) return;
+            uintptr_t function = SetRunningFn;
+            _asm {
+                mov eax, icon
+                mov edx, running
+                call function
+            }
+        }
+
         void StopCooldown(TNTTimeAniIcon* icon) {
             icon->elapsedMs = 0;
             icon->unknown_110 = 0;
@@ -1154,13 +1268,47 @@ namespace {
             }
         }
 
+        // The skill's entry holds the cooldown: +0x20 length in 100 ms, +0x24 start tick.
+        void ShowEntryCooldown(SlotView& slot, const uint32_t now) {
+            TNTTimeAniIcon* icon = slot.icon;
+            const auto* entry = reinterpret_cast<const uint8_t*>(icon->image);
+            const uint32_t length = *reinterpret_cast<const uint32_t*>(entry + 0x20) * 100;
+            const uint32_t start = *reinterpret_cast<const uint32_t*>(entry + 0x24);
+            const bool running = start > 0 && now - start < length;
+            if (running && (!slot.cooling || start != slot.cooldownStart)) {
+                SetLength(icon, static_cast<int>(length));
+                SetRunning(icon, 1);
+                SetSweep(icon, static_cast<int>(now - start));
+                reinterpret_cast<uint8_t*>(&icon->flags)[1] = 1;
+                auto* color = reinterpret_cast<uint8_t*>(&icon->color);
+                color[0] = 0x4F;
+                color[1] = 0x4F;
+                color[2] = 0xCD;
+                if (icon->textLabel) {
+                    auto* label = reinterpret_cast<TLBSWidget*>(icon->textLabel);
+                    if (!label->isVisible) label->isVisible = true;
+                }
+                slot.cooling = true;
+                slot.cooldownStart = start;
+            } else if (!running && slot.cooling) {
+                StopCooldown(icon);
+                slot.cooling = false;
+                slot.cooldownStart = 0;
+            }
+        }
+
         void SyncCooldowns(const TLBSWidget* root) {
             const uint32_t now = GameTime();
             if (!now) return;
-            for (Panel& panelRef : Panels) {
-                Panel* panel = &panelRef;
-                for (SlotView& slot : panel->slots) {
+            for (int layer = 0; layer < LayerCount; layer++) {
+                Panel* panel = &Panels[layer];
+                for (int cell = 0; cell < 8; cell++) {
+                    SlotView& slot = panel->slots[cell];
                     if (!slot.icon || !slot.icon->image || !slot.icon->isVisible) continue;
+                    if (!IsBarSkill(Bindings[layer][cell].action)) {
+                        ShowEntryCooldown(slot, now);
+                        continue;
+                    }
                     const uintptr_t record = reinterpret_cast<uintptr_t>(slot.icon->image);
                     if (!slot.source || !IsClass(slot.source, "TNTTimeAniIcon")
                         || reinterpret_cast<uintptr_t>(slot.source->image) != record) {
@@ -1222,25 +1370,50 @@ namespace {
                     const std::string key = "L" + std::to_string(layer) + "C" + std::to_string(cell);
                     std::string value = "-";
                     if (binding.set && binding.action) value = "A," + std::to_string(binding.action);
-                    else if (binding.set) value = std::to_string(binding.kind) + "," + std::to_string(binding.index);
+                    else if (binding.set) value = "S," + std::to_string(binding.tab) + "," + std::to_string(binding.index);
                     WritePrivateProfileStringA(section.c_str(), key.c_str(), value.c_str(), path.c_str());
                 }
             }
         }
 
-        const uint8_t* SkillWindowIconAt(const TLBSWidget* root, const int16_t kind, const int16_t index) {
+        const uint8_t* SkillItem(const TLBSWidget* root, const int16_t tab, const int16_t index) {
             const TLBSWidget* window = SkillWindow(root);
-            if (!window || !window->childrenList || !window->childrenList->list) return nullptr;
-            for (uint32_t i = 0; i < window->childrenList->count; i++) {
-                const TLBSWidget* child = window->childrenList->list[i];
-                if (!IsClass(child, "TNTTimeAniIcon")) continue;
-                const auto* bytes = reinterpret_cast<const uint8_t*>(child);
-                if (*reinterpret_cast<const uintptr_t*>(bytes + 0xB0) && *reinterpret_cast<const int16_t*>(bytes + 0xB4) == kind
-                    && *reinterpret_cast<const int16_t*>(bytes + 0xB8) == index) {
-                    return bytes;
+            if (!window) return nullptr;
+            const auto* bytes = reinterpret_cast<const uint8_t*>(window);
+            for (uint32_t offset = 0x15C; offset <= 0x168; offset += 4) {
+                const auto* list = *reinterpret_cast<const uint8_t* const*>(bytes + offset);
+                if (!IsClass(reinterpret_cast<const TLBSWidget*>(list), "TNTItemList")) continue;
+                const auto* items = *reinterpret_cast<const uint8_t* const* const*>(list + 4);
+                const int32_t count = *reinterpret_cast<const int32_t*>(list + 8);
+                for (int32_t i = 0; items && i < count; i++) {
+                    const uint8_t* item = items[i];
+                    if (item && *reinterpret_cast<const uintptr_t*>(item) && *reinterpret_cast<const int16_t*>(item + 6) == tab
+                        && *reinterpret_cast<const int16_t*>(item + 8) == index) {
+                        return item;
+                    }
                 }
             }
             return nullptr;
+        }
+
+        const uint8_t* MotionItem(const TLBSWidget* root, const int16_t index) {
+            return SkillItem(root, 3, index);
+        }
+
+        bool ShowMotion(TNTTimeAniIcon* icon, const TLBSWidget* root, const int16_t index) {
+            const TNTTimeAniIcon* model = SkillWindowIcon(root, 0);
+            const uint8_t* item = MotionItem(root, index);
+            if (!model || !item) return false;
+            auto* bytes = reinterpret_cast<uint8_t*>(icon);
+            const auto* source = reinterpret_cast<const uint8_t*>(model);
+            std::memcpy(bytes + 0x70, source + 0x70, 0x78 - 0x70);
+            std::memcpy(bytes + 0x98, source + 0x98, 0xB0 - 0x98);
+            std::memcpy(bytes + 0xB0, item, 0xBC - 0xB0);
+            *reinterpret_cast<TNTTimeAniIcon**>(bytes + 0x74) = icon;
+            icon->resized = true;
+            static_cast<TLBSWidget*>(icon)->isInteractable = false;
+            StopCooldown(icon);
+            return true;
         }
 
         void ClearBindings() {
@@ -1273,7 +1446,7 @@ namespace {
         }
 
         bool LoadBindings(const TLBSWidget* root) {
-            if (!SkillWindowIconAt(root, 3, 0) && !SkillWindowIcon(root, 0)) return false;
+            if (!SkillWindowIcon(root, 0)) return false;
             ClearBindings();
             const std::string path = IniPath();
             const std::string section = Section();
@@ -1291,7 +1464,7 @@ namespace {
                     char value[32]{};
                     const std::string key = "L" + std::to_string(layer) + "C" + std::to_string(cell);
                     GetPrivateProfileStringA(section.c_str(), key.c_str(), "", value, sizeof(value), path.c_str());
-                    int kind = 0, index = 0;
+                    int kind = 0, tab = 0, index = 0;
                     if (!value[0] && DefaultActions[layer][cell]) {
                         Binding& binding = Bindings[layer][cell];
                         binding.set = true;
@@ -1306,25 +1479,27 @@ namespace {
                         ApplyBinding(Panels[layer].slots[cell], binding);
                         continue;
                     }
-                    if (std::sscanf(value, "%d,%d", &kind, &index) != 2) {
+                    if (std::sscanf(value, "S,%d,%d", &tab, &index) != 2) {
                         ApplyBinding(Panels[layer].slots[cell], Bindings[layer][cell]);
                         continue;
                     }
-                    const uint8_t* source = SkillWindowIconAt(root, static_cast<int16_t>(kind), static_cast<int16_t>(index));
-                    if (!source) {
+                    const TNTTimeAniIcon* model = SkillWindowIcon(root, 0);
+                    const uint8_t* item = SkillItem(root, static_cast<int16_t>(tab), static_cast<int16_t>(index));
+                    if (!model || !item) {
                         anyMissing = true;
                         continue;
                     }
                     Binding& binding = Bindings[layer][cell];
+                    binding = {};
                     binding.set = true;
-                    std::memcpy(binding.fields, source + BindingFirst, BindingSize);
-                    binding.kind = static_cast<int16_t>(kind);
+                    std::memcpy(binding.fields, reinterpret_cast<const uint8_t*>(model) + BindingFirst, 0xB0 - BindingFirst);
+                    std::memcpy(binding.fields + (0xB0 - BindingFirst), item, 0xBC - 0xB0);
+                    binding.tab = static_cast<int16_t>(tab);
                     binding.index = static_cast<int16_t>(index);
                     ApplyBinding(Panels[layer].slots[cell], binding);
                 }
             }
-            (void)anyMissing;
-            return true;
+            return !anyMissing;
         }
 
         void RequestLoad() {
@@ -1380,7 +1555,7 @@ namespace {
                         binding = {};
                         binding.set = true;
                         std::memcpy(binding.fields, DragFields, BindingSize);
-                        binding.kind = *reinterpret_cast<int16_t*>(DragFields + (0xB4 - BindingFirst));
+                        binding.tab = *reinterpret_cast<int16_t*>(DragFields + (0xB6 - BindingFirst));
                         binding.index = *reinterpret_cast<int16_t*>(DragFields + (0xB8 - BindingFirst));
                         ApplyBinding(Panels[layer].slots[i], binding);
                         SaveBindings();
@@ -1401,10 +1576,14 @@ namespace {
         PendingCast Casting;
 
         // Skills are used with a posted double-click because the skill window's handler is guarded.
+        bool ResolveSkill(const TLBSWidget* root, Binding& binding, SlotView& slot);
+
         bool Cast(const int layer, const int cell) {
             Panel& panel = Panels[layer];
             SlotView& slot = panel.slots[cell];
-            if (!Bindings[layer][cell].set || Bindings[layer][cell].action || !slot.icon || !panel.shown) return false;
+            Binding& binding = Bindings[layer][cell];
+            if (!binding.set || (binding.action && !(IsBarSkill(binding.action) && slot.barRecord)) || !slot.icon || !panel.shown) return false;
+            if (!binding.action && !ResolveSkill(AttachedRoot, binding, slot)) return false;
             if (Casting.active) return true;
             HWND window = FindGameWindow();
             if (!window) return false;
@@ -1443,6 +1622,10 @@ namespace {
         TEWGraphicButtonWidget* PaletteTiles[ActionCount]{};
         Rect PaletteRects[ActionCount]{};
         uint8_t PaletteRefs[ActionCount]{};
+        TNTTimeAniIcon* PaletteMotions[ActionCount]{};
+        bool PaletteMotionShown[ActionCount]{};
+        uintptr_t PaletteBarRecords[ActionCount]{};
+        TEWLabel* PaletteTexts[ActionCount]{};
 
         void HighlightSelection() {
             for (int id = 1; id < ActionCount; id++) {
@@ -1467,7 +1650,7 @@ namespace {
         }
 
         void BuildPalette(TLBSWidget* root, const int16_t panelsRight) {
-            constexpr int Rows = 6;
+            constexpr int Rows = ActionCount / 2;
             const int16_t height = static_cast<int16_t>(Rows * Step + 30);
             const int16_t left = static_cast<int16_t>(panelsRight + 30);
             const int16_t top = static_cast<int16_t>(root->rect.bottom - root->rect.top - BottomMargin - Step - SlotSize / 2 - height + SlotSize + 2 * Step - EditRaise);
@@ -1485,11 +1668,30 @@ namespace {
                 PaletteRects[id] = {static_cast<int16_t>(left + x), static_cast<int16_t>(top + y),
                                     static_cast<int16_t>(left + x + SlotSize), static_cast<int16_t>(top + y + SlotSize)};
                 const ActionLook& look = Actions[id];
-                if (look.icon) {
-                    AddSprite(container, GameUiImage, *look.icon, static_cast<int16_t>(x + (SlotSize - look.icon->width) / 2),
-                              static_cast<int16_t>(y + (SlotSize - look.icon->height) / 2 + 4));
+                PaletteMotions[id] = nullptr;
+                PaletteMotionShown[id] = false;
+                if (look.sprite) {
+                    AddPicture(container, *look.sprite, x, y, look.caption[0]);
+                } else if (look.motion || IsBarSkill(static_cast<uint8_t>(id))) {
+                    PaletteBarRecords[id] = 0;
+                    if (IsBarSkill(static_cast<uint8_t>(id))) {
+                        PaletteTexts[id] = AddLabel(container, static_cast<int16_t>(x - 8), static_cast<int16_t>(y + SlotSize / 2 - 6),
+                                                    SlotSize + 16, 3, look.text);
+                    }
+                    if (auto* icon = Widget::Create<TNTTimeAniIcon>(CachedHost)) {
+                        InitCooldownFields(icon, root);
+                        constexpr int16_t IconInset = 4;
+                        icon->rect = {static_cast<int16_t>(x + IconInset), static_cast<int16_t>(y + IconInset),
+                                      static_cast<int16_t>(x + SlotSize - IconInset), static_cast<int16_t>(y + SlotSize - IconInset)};
+                        static_cast<TLBSWidget*>(icon)->isVisible = false;
+                        Attach(container, icon);
+                        PaletteMotions[id] = icon;
+                    }
                 } else {
                     AddLabel(container, static_cast<int16_t>(x - 8), static_cast<int16_t>(y + SlotSize / 2 - 6), SlotSize + 16, 3, look.text);
+                }
+                if (look.caption[0]) {
+                    AddLabel(container, static_cast<int16_t>(x - 8), static_cast<int16_t>(y + SlotSize - 22), SlotSize + 16, 3, look.caption);
                 }
             }
             HighlightSelection();
@@ -1550,6 +1752,8 @@ namespace {
             if (PaletteContainer) Detach(PaletteContainer);
             PaletteContainer = nullptr;
             for (auto& tile : PaletteTiles) tile = nullptr;
+            for (auto& icon : PaletteMotions) icon = nullptr;
+            for (auto& text : PaletteTexts) text = nullptr;
             SelectedAction = NoAction;
         }
 
@@ -1582,7 +1786,7 @@ namespace {
             }
             const bool moved = DraggedAction && (std::abs(mouseX - DragStartX) > 4 || std::abs(mouseY - DragStartY) > 4);
             if (down && moved) {
-                if (!DragLabel && (DragLabel = AddLabel(root, 0, 0, 80, 3, Actions[DraggedAction].icon ? L"Pets" : Actions[DraggedAction].text))) {
+                if (!DragLabel && (DragLabel = AddLabel(root, 0, 0, 80, 3, Actions[DraggedAction].text))) {
                     DragLabel->textColor = Color(255, 255, 220, 120);
                 }
                 if (DragLabel) {
@@ -1633,6 +1837,107 @@ namespace {
                                                   EditRaise + 2 * EditRow, EditRaise + 2 * EditRow};
 
 
+        TNTTimeAniIcon* BarIcon(const TLBSWidget* root, const uint8_t action) {
+            const bool pet = action <= PetSkill3;
+            const TLBSWidget* bar = FindWidgetOfClass(root, pet ? "TNTPetSKillSlotWidget" : "TNTPartnerSlotWidget", 1);
+            if (!bar || !bar->childrenList || !bar->childrenList->list) return nullptr;
+            int wanted = action - (pet ? PetSkill1 : PartnerSkill1);
+            for (uint32_t i = 0; i < bar->childrenList->count; i++) {
+                TLBSWidget* child = bar->childrenList->list[i];
+                if (IsClass(child, "TNTTimeAniIcon") && wanted-- == 0) return reinterpret_cast<TNTTimeAniIcon*>(child);
+            }
+            return nullptr;
+        }
+
+        uintptr_t CopyBarSkill(TNTTimeAniIcon* icon, const TNTTimeAniIcon* source, const bool interactable) {
+            const uintptr_t record = source ? reinterpret_cast<uintptr_t>(source->image) : 0;
+            if (!record) return 0;
+            auto* bytes = reinterpret_cast<uint8_t*>(icon);
+            const auto* from = reinterpret_cast<const uint8_t*>(source);
+            std::memcpy(bytes + 0x70, from + 0x70, 0x78 - 0x70);
+            std::memcpy(bytes + 0x98, from + 0x98, 0xBC - 0x98);
+            *reinterpret_cast<TNTTimeAniIcon**>(bytes + 0x74) = icon;
+            icon->resized = true;
+            static_cast<TLBSWidget*>(icon)->isInteractable = interactable;
+            StopCooldown(icon);
+            return record;
+        }
+
+        // The game rebuilds skill entries when the list changes, so find them again by tab and id.
+        bool ResolveSkill(const TLBSWidget* root, Binding& binding, SlotView& slot) {
+            const uint8_t* item = SkillItem(root, binding.tab, binding.index);
+            if (!item) {
+                slot.missing = true;
+                return false;
+            }
+            slot.missing = false;
+            uint8_t* fields = binding.fields + (0xB0 - BindingFirst);
+            if (std::memcmp(fields, item, 0xBC - 0xB0) == 0
+                && slot.icon && std::memcmp(reinterpret_cast<uint8_t*>(slot.icon) + 0xB0, item, 0xBC - 0xB0) == 0) {
+                return true;
+            }
+            std::memcpy(fields, item, 0xBC - 0xB0);
+            if (slot.icon) {
+                std::memcpy(reinterpret_cast<uint8_t*>(slot.icon) + 0xB0, item, 0xBC - 0xB0);
+                StopCooldown(slot.icon);
+            }
+            slot.source = nullptr;
+            slot.cooling = false;
+            slot.cooldownStart = 0;
+            return true;
+        }
+
+        void ResolveSkills(const TLBSWidget* root) {
+            for (int layer = 0; layer < LayerCount; layer++) {
+                for (int cell = 0; cell < 8; cell++) {
+                    Binding& binding = Bindings[layer][cell];
+                    if (binding.set && !binding.action) ResolveSkill(root, binding, Panels[layer].slots[cell]);
+                }
+            }
+        }
+
+        void ShowBarSkills(const TLBSWidget* root) {
+            for (int layer = 0; layer < LayerCount; layer++) {
+                for (int cell = 0; cell < 8; cell++) {
+                    const Binding& binding = Bindings[layer][cell];
+                    SlotView& slot = Panels[layer].slots[cell];
+                    if (!binding.set || !IsBarSkill(binding.action) || !slot.icon) continue;
+                    TNTTimeAniIcon* source = BarIcon(root, binding.action);
+                    const uintptr_t record = source ? reinterpret_cast<uintptr_t>(source->image) : 0;
+                    if (record == slot.barRecord) continue;
+                    slot.barRecord = CopyBarSkill(slot.icon, source, true);
+                    slot.source = slot.barRecord ? source : nullptr;
+                    slot.cooling = false;
+                }
+            }
+            for (int id = PetSkill1; id <= PartnerSkill3; id++) {
+                TNTTimeAniIcon* icon = PaletteMotions[id];
+                if (!icon) continue;
+                TNTTimeAniIcon* source = BarIcon(root, static_cast<uint8_t>(id));
+                const uintptr_t record = source ? reinterpret_cast<uintptr_t>(source->image) : 0;
+                if (record == PaletteBarRecords[id]) continue;
+                PaletteBarRecords[id] = CopyBarSkill(icon, source, false);
+                static_cast<TLBSWidget*>(icon)->isVisible = PaletteBarRecords[id] != 0;
+                if (PaletteTexts[id]) PaletteTexts[id]->isVisible = PaletteBarRecords[id] == 0;
+            }
+        }
+
+        void ShowMotions(const TLBSWidget* root) {
+            for (int layer = 0; layer < LayerCount; layer++) {
+                for (int cell = 0; cell < 8; cell++) {
+                    const Binding& binding = Bindings[layer][cell];
+                    SlotView& slot = Panels[layer].slots[cell];
+                    const int16_t motion = binding.set && binding.action ? Actions[binding.action].motion : 0;
+                    if (motion && slot.icon && slot.motion != motion && ShowMotion(slot.icon, root, motion)) slot.motion = motion;
+                }
+            }
+            for (int id = 1; id < ActionCount; id++) {
+                if (!PaletteMotions[id] || !Actions[id].motion || PaletteMotionShown[id] || !ShowMotion(PaletteMotions[id], root, Actions[id].motion)) continue;
+                PaletteMotionShown[id] = true;
+                static_cast<TLBSWidget*>(PaletteMotions[id])->isVisible = true;
+            }
+        }
+
         int ActiveLayer(const XINPUT_GAMEPAD& pad) {
             const bool lt = pad.bLeftTrigger > XINPUT_GAMEPAD_TRIGGER_THRESHOLD;
             const bool rt = pad.bRightTrigger > XINPUT_GAMEPAD_TRIGGER_THRESHOLD;
@@ -1670,6 +1975,9 @@ namespace {
             TrackCharacter();
             UpdateLoad(root);
             StepCast();
+            ResolveSkills(root);
+            ShowMotions(root);
+            ShowBarSkills(root);
             SyncCooldowns(root);
             if (EditMode) {
                 WatchDrag(root, mouseX, mouseY);
@@ -1720,7 +2028,7 @@ namespace {
             if (!(pressed & CellButtons[cell])) continue;
             const Overlay::Binding& binding = Overlay::Bindings[layer][cell];
             if (!binding.set) continue;
-            if (!binding.action) {
+            if (!binding.action || Overlay::IsBarSkill(binding.action)) {
                 if (Overlay::Cast(layer, cell)) PauseMovement();
                 continue;
             }
@@ -1808,7 +2116,8 @@ extern "C" {
         FindWalkTargetGlobal();
         Safety::Verify(Host, {{"RotateBy", rotateByFunction}, {"MoveTo", moveFunction},
                               {"pet command", petsFollowFunction}, {"stop action", stopActionFunction},
-                              {"select by id", selectByIdFunction}, {"cooldown sweep", Overlay::FindSetElapsed()}});
+                              {"select by id", selectByIdFunction}, {"cooldown sweep", Overlay::FindSetElapsed()},
+                              {"cooldown length", Overlay::FindSetLength()}, {"cooldown running", Overlay::FindSetRunning()}});
         LoadXInput();
     }
 
@@ -1873,6 +2182,10 @@ extern "C" {
                     return;
                 }
                 const auto& player = Scene->mapPlayerObjPtr;
+                // Dead: the respawn box takes the click, so the game sends nothing, not even pet moves.
+                if (reinterpret_cast<const uint8_t*>(player)[0xA9] == 4) {
+                    return;
+                }
                 const int CurrentX = player->xPosition;
                 const int CurrentY = player->yPosition;
                 TLBSWidget* navi = FindNaviWidget(RootWidget);
