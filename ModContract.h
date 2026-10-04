@@ -20,6 +20,12 @@ struct ModClassRequirement {
 
 struct TickContext {
     bool isPlayerLoaded;
+    float mouseWheel; // only filled in ModEarlyTick, always 0 in ModTick
+    int32_t mouseX;
+    int32_t mouseY;
+    int32_t playerX;  // -1 when no character is loaded
+    int32_t playerY;
+    int32_t mapId;    // -1 until the first map change after NosBoost loads
 };
 
 namespace Packet {
@@ -93,6 +99,11 @@ struct ModHost {
     // This mod's own self-reported health, shown in the F9 menu -- see
     // ModHealthLevel above.
     void(* ReportStatus)(ModHealthLevel Level, const char* Message);
+
+    void(* InjectSendRawPacket)(const char* Packet);
+
+    // PNG bytes into the game's UI texture cache. Returns the image id (imageData.imageName), 0 if it fails.
+    int32_t(* LoadUiImage)(const void* PngData, uint32_t Size, uint16_t* Width, uint16_t* Height);
 };
 
 namespace Packet {
@@ -154,10 +165,18 @@ namespace Widget {
 // void ModTick(TLBSWidget* RootWidget);
 //     Once per tick while started. RootWidget may be null -- check first.
 //
+// void ModEarlyTick(TLBSWidget* RootWidget, TickContext tickContext);
+//     Optional. Runs once per frame like ModTick, but at the start of the frame
+//     instead of the end. The game doesn't move widgets anymore once it starts
+//     drawing the frame, so if you move a widget in ModTick it only shows up the
+//     next frame. Move it here and it shows up in the same frame. Use this when
+//     you keep a widget stuck to another one so it doesn't lag a frame behind.
+//
 // void ModToggleMainWindow();
 //     Called on the mod's F9-menu click -- flip your own visibility flag.
 using ModGetRequirementsFn = const ModClassRequirement*(*)(size_t*);
 using ModStartupFn = void(*)(ImGuiContext*, ImGuiMemAllocFunc, ImGuiMemFreeFunc, void*, const ModHost*);
 using ModShutdownFn = void(*)();
 using ModTickFn = void(__cdecl*)(TLBSWidget*, TickContext);
+using ModEarlyTickFn = void(__cdecl*)(TLBSWidget*, TickContext);
 using ModToggleMainWindowFn = void(*)();
