@@ -1,0 +1,433 @@
+#include "Game.h"
+#include "Camera.h"
+#include "Input.h"
+#include "Overlay.h"
+#include "Navigator.h"
+
+namespace ControllerSupport::Navigator {
+    int FrameImage = 0;
+    uint16_t FrameSize = 0;
+
+    bool IsA(const TLBSWidget* widget, const char* name) {
+        uintptr_t vmt = widget ? widget->vTable : 0;
+        const size_t length = strlen(name);
+        while (vmt) {
+            const auto* className = *reinterpret_cast<const uint8_t**>(vmt - 0x2C);
+            if (className && className[0] == length && memcmp(className + 1, name, length) == 0) return true;
+            const uintptr_t parent = *reinterpret_cast<const uintptr_t*>(vmt - 0x24);
+            vmt = parent ? *reinterpret_cast<const uintptr_t*>(parent) : 0;
+        }
+        return false;
+    }
+
+    bool Selectable(const TLBSWidget* widget) {
+        return widget->isInteractable && widget->rect.right > widget->rect.left && widget->rect.bottom > widget->rect.top
+            && (IsA(widget, "TEWCustomButtonWidget") || IsA(widget, "TEWRollOverButtonWidget") || IsA(widget, "TEWEditWidget")
+                || IsA(widget, "TNTIconWidget"));
+    }
+
+    void Collect(TLBSWidget* widget, const int16_t x, const int16_t y, std::vector<Target>& out);
+
+    void CollectWindow(TLBSWidget* window, std::vector<Target>& out) {
+        if (Selectable(window)) out.push_back({window, window->rect});
+        Collect(window, window->rect.left, window->rect.top, out);
+    }
+
+    void Collect(TLBSWidget* widget, const int16_t x, const int16_t y, std::vector<Target>& out) {
+        if (!widget->childrenList || !widget->childrenList->list) return;
+        for (uint32_t i = 0; i < widget->childrenList->count; i++) {
+            TLBSWidget* child = widget->childrenList->list[i];
+            if (!child || !child->isVisible) continue;
+            const Rect rect{static_cast<int16_t>(x + child->rect.left), static_cast<int16_t>(y + child->rect.top),
+                            static_cast<int16_t>(x + child->rect.right), static_cast<int16_t>(y + child->rect.bottom)};
+            if (Selectable(child)) out.push_back({child, rect});
+            Collect(child, rect.left, rect.top, out);
+        }
+    }
+
+    // Only a window that just appeared with the focus, not one already on screen that the focus falls back to.
+    TLBSWidget* FocusedWindow(TLBSWidget* root) {
+        TLBSWidget* focus = root->someChild;
+        const bool valid = focus && focus->isVisible && focus != FindNaviWidget(root) && root->childrenList
+            && root->childrenList->index_of(focus) >= 0;
+        const bool appeared = valid && !ShownBefore.empty() && std::ranges::find(ShownBefore, focus) == ShownBefore.end();
+        ShownBefore.clear();
+        if (root->childrenList && root->childrenList->list) {
+            for (uint32_t i = 0; i < root->childrenList->count; i++) {
+                TLBSWidget* child = root->childrenList->list[i];
+                if (child && child->isVisible) ShownBefore.push_back(child);
+            }
+        }
+        if (!valid) return nullptr;
+        return focus == Window || appeared ? focus : nullptr;
+    }
+
+    bool Ours(const TLBSWidget* widget) {
+        for (const Overlay::Panel& panel : Overlay::Panels) {
+            if (panel.container == widget) return true;
+        }
+        for (const TEWCustomPanelWidget* piece : Frame) {
+            if (piece == widget) return true;
+        }
+        return widget == Overlay::PaletteContainer || widget == Overlay::EditBoard || widget == Overlay::DragLabel;
+    }
+
+    std::vector<TLBSWidget*> OpenWindows(TLBSWidget* root) {
+        std::vector<TLBSWidget*> windows;
+        if (!root->childrenList || !root->childrenList->list) return windows;
+        // Everything listed before TNaviWidget is drawn under it and can't be seen.
+        const int32_t navi = root->childrenList->index_of(FindNaviWidget(root));
+        std::vector<Target> found;
+        for (uint32_t i = navi < 0 ? 0 : navi + 1; i < root->childrenList->count; i++) {
+            TLBSWidget* child = root->childrenList->list[i];
+            if (!child || !child->isVisible || Ours(child) || (child->rect.left < 0 && child->rect.right <= 0)) continue;
+            found.clear();
+            CollectWindow(child, found);
+            if (!found.empty()) windows.push_back(child);
+        }
+        return windows;
+    }
+
+    POINT Centre(const Rect& rect) {
+        return {(rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2};
+    }
+
+    // The bottom row's left button, which is confirm in the game's message boxes.
+    const Target* Primary() {
+        const Target* best = nullptr;
+        for (const Target& target : Targets) {
+            if (!IsA(target.widget, "TEWCustomButtonWidget")) continue;
+            if (!best || target.rect.bottom > best->rect.bottom + 4
+                || (std::abs(target.rect.bottom - best->rect.bottom) <= 4 && target.rect.left < best->rect.left)) {
+                best = &target;
+            }
+        }
+        return best ? best : Targets.empty() ? nullptr : &Targets.front();
+    }
+
+    const Target* Find(const TLBSWidget* widget) {
+        for (const Target& target : Targets) {
+            if (target.widget == widget) return &target;
+        }
+        return nullptr;
+    }
+
+    const Target* Step(const Target& from, const float dx, const float dy) {
+        const POINT origin = Centre(from.rect);
+        for (const float cone : {1.75f, 1.0e9f}) {
+            const Target* best = nullptr;
+            float bestScore = 0.0f;
+            for (const Target& target : Targets) {
+                if (&target == &from) continue;
+                const POINT centre = Centre(target.rect);
+                const float vx = static_cast<float>(centre.x - origin.x), vy = static_cast<float>(centre.y - origin.y);
+                const float along = vx * dx + vy * dy;
+                const float across = std::abs(vx * dy - vy * dx);
+                if (along <= 0.0f || across > along * cone) continue;
+                const float score = along + 2.0f * across;
+                if (!best || score < bestScore) {
+                    best = &target;
+                    bestScore = score;
+                }
+            }
+            if (best) return best;
+        }
+        return nullptr;
+    }
+
+    void PostMouse(const UINT message, const WPARAM keys, const Rect& rect) {
+        HWND window = FindGameWindow();
+        if (!window) return;
+        const POINT at = Centre(rect);
+        PostMessageA(window, message, keys, MAKELPARAM(at.x, at.y));
+    }
+
+    TEWCustomPanelWidget* AddPiece(TLBSWidget* root, const AtlasFrame& frame) {
+        auto* piece = Widget::Create<TEWCustomPanelWidget>(CachedHost);
+        if (!piece) return nullptr;
+        delete[] piece->imageData.atlasFrames;
+        piece->imageData.imageName = FrameImage;
+        piece->imageData.imageWidth = static_cast<int16_t>(FrameSize);
+        piece->imageData.imageHeight = static_cast<int16_t>(FrameSize);
+        piece->imageData.frameCount = 1;
+        piece->imageData.atlasFrames = new AtlasFrame[1]{frame};
+        piece->drawMode = 0;
+        piece->isMoveable = false;
+        piece->isInteractable = false;
+        piece->isVisible = false;
+        Overlay::Attach(root, piece);
+        return piece;
+    }
+
+    // Eight pieces around the target, none over it, so posted clicks land on the target itself.
+    void PlaceFrame(TLBSWidget* root, const Rect* around) {
+        if (Pointing) around = nullptr;
+        if (!FrameImage) {
+            uint16_t height = 0;
+            FrameImage = LoadUiImageResource("FRAME", FrameSize, height);
+            if (!FrameImage) return;
+        }
+        constexpr int16_t C = 8;
+        const int16_t S = static_cast<int16_t>(FrameSize);
+        const AtlasFrame frames[8] = {{0, 0, C, C}, {C, 0, static_cast<int16_t>(S - 2 * C), C}, {static_cast<int16_t>(S - C), 0, C, C},
+                                      {static_cast<int16_t>(S - C), C, C, static_cast<int16_t>(S - 2 * C)},
+                                      {static_cast<int16_t>(S - C), static_cast<int16_t>(S - C), C, C},
+                                      {C, static_cast<int16_t>(S - C), static_cast<int16_t>(S - 2 * C), C},
+                                      {0, static_cast<int16_t>(S - C), C, C}, {0, C, C, static_cast<int16_t>(S - 2 * C)}};
+        if (FrameRoot != root) Destroy();
+        FrameRoot = root;
+        for (int i = 0; i < 8; i++) {
+            if (!Frame[i]) Frame[i] = AddPiece(root, frames[i]);
+        }
+        if (!around) {
+            for (TEWCustomPanelWidget* piece : Frame) {
+                if (piece && piece->isVisible) piece->isVisible = false;
+            }
+            FrameAround = {};
+            return;
+        }
+        const Rect& r = *around;
+        if (r.left != FrameAround.left || r.top != FrameAround.top || r.right != FrameAround.right || r.bottom != FrameAround.bottom) {
+            FrameAround = r;
+            const int16_t l = static_cast<int16_t>(r.left - C), t = static_cast<int16_t>(r.top - C);
+            const int16_t rr = r.right, b = r.bottom;
+            const Rect rects[8] = {{l, t, r.left, r.top}, {r.left, t, rr, r.top}, {rr, t, static_cast<int16_t>(rr + C), r.top},
+                                   {rr, r.top, static_cast<int16_t>(rr + C), b}, {rr, b, static_cast<int16_t>(rr + C), static_cast<int16_t>(b + C)},
+                                   {r.left, b, rr, static_cast<int16_t>(b + C)}, {l, b, r.left, static_cast<int16_t>(b + C)},
+                                   {l, r.top, r.left, b}};
+            for (int i = 0; i < 8; i++) {
+                if (Frame[i]) Frame[i]->rect = rects[i];
+            }
+        }
+        for (TEWCustomPanelWidget* piece : Frame) {
+            if (!piece) continue;
+            if (!piece->isVisible) piece->isVisible = true;
+            if (root->childrenList->index_of(piece) < root->childrenList->index_of(Window)) piece->BubbleUp();
+        }
+    }
+
+    void KeepOnTop(TLBSWidget* root, TLBSWidget* widget) {
+        if (root->childrenList->index_of(widget) < root->childrenList->index_of(Window)) widget->BubbleUp();
+    }
+
+    // The real cursor, saved first so it can go back when UI mode ends.
+    void MoveCursor(const Rect& rect) {
+        HWND window = FindGameWindow();
+        if (!window) return;
+        if (!CursorSaved) CursorSaved = GetCursorPos(&SavedCursor) != 0;
+        POINT at = Centre(rect);
+        ClientToScreen(window, &at);
+        SetCursorPos(at.x, at.y);
+        LastCursor = at;
+        if (Holding) PostMouse(WM_MOUSEMOVE, MK_LBUTTON, rect);
+    }
+
+    void RestoreCursor() {
+        if (!CursorSaved) return;
+        SetCursorPos(SavedCursor.x, SavedCursor.y);
+        LastCursor = SavedCursor;
+        CursorSaved = false;
+    }
+
+    void Select(TLBSWidget* root, const Target* target) {
+        Selected = target ? target->widget : nullptr;
+        SelectedRect = target ? target->rect : Rect{};
+        if (target && Holding) MoveCursor(target->rect);
+        else if (target) PostMouse(WM_MOUSEMOVE, 0, target->rect);
+        PlaceFrame(root, target ? &target->rect : nullptr);
+    }
+
+    bool Update(TLBSWidget* root, const XINPUT_GAMEPAD& pad) {
+        const bool viewDown = (pad.wButtons & XINPUT_GAMEPAD_BACK) != 0;
+        const bool viewPressed = viewDown && !ViewWasDown;
+        ViewWasDown = viewDown;
+        TLBSWidget* window = FocusedWindow(root);
+        if (viewPressed && (Manual || Window)) {
+            Close();
+            PreviousButtons = pad.wButtons;
+            return true;
+        }
+        if (!window && (viewPressed || Manual)) {
+            const std::vector<TLBSWidget*> windows = OpenWindows(root);
+            if (Manual && std::ranges::find(windows, Window) != windows.end()) {
+                window = Window;
+            } else if (!windows.empty()) {
+                const auto focused = std::ranges::find(windows, root->someChild);
+                window = focused != windows.end() ? *focused : windows.back();
+            }
+            Manual = window != nullptr;
+        }
+        if (!window) {
+            Close();
+            return false;
+        }
+        Targets.clear();
+        CollectWindow(window, Targets);
+        if (window != Window) {
+            Window = window;
+            Holding = false;
+            Select(root, Primary());
+            PreviousButtons = pad.wButtons;
+            WaitNeutral = true;
+            return true;
+        }
+        const Target* current = Find(Selected);
+        if (!current) {
+            current = Primary();
+            Select(root, current);
+        } else if (current->rect.left != SelectedRect.left || current->rect.top != SelectedRect.top
+                   || current->rect.right != SelectedRect.right || current->rect.bottom != SelectedRect.bottom) {
+            Select(root, current);
+        } else {
+            PlaceFrame(root, &current->rect);
+        }
+
+        const WORD buttons = pad.wButtons;
+        const WORD pressed = buttons & ~PreviousButtons;
+        const WORD released = PreviousButtons & ~buttons;
+        PreviousButtons = buttons;
+
+        float dx = 0.0f, dy = 0.0f;
+        if (buttons & XINPUT_GAMEPAD_DPAD_LEFT) dx = -1.0f;
+        if (buttons & XINPUT_GAMEPAD_DPAD_RIGHT) dx = 1.0f;
+        if (buttons & XINPUT_GAMEPAD_DPAD_UP) dy = -1.0f;
+        if (buttons & XINPUT_GAMEPAD_DPAD_DOWN) dy = 1.0f;
+        const float sx = pad.sThumbLX, sy = pad.sThumbLY;
+        const float magnitude = std::sqrt(sx * sx + sy * sy);
+        if (dx == 0.0f && dy == 0.0f && magnitude > LeftStickDeadzone * 2.0f) {
+            dx = sx / magnitude;
+            dy = -sy / magnitude;
+        } else if (dx != 0.0f && dy != 0.0f) {
+            dx *= 0.7071f;
+            dy *= 0.7071f;
+        }
+        // The press that opened the window may still be held.
+        if (WaitNeutral) {
+            if (dx != 0.0f || dy != 0.0f) {
+                dx = dy = 0.0f;
+            } else {
+                WaitNeutral = false;
+            }
+        }
+        const DWORD tick = GetTickCount();
+        const float seconds = PointerTick ? std::min(static_cast<float>(tick - PointerTick) / 1000.0f, 0.1f) : 0.0f;
+        PointerTick = tick;
+        float px, py;
+        ReadStick(pad.sThumbRX, pad.sThumbRY, RightStickDeadzone, px, py);
+        if (px != 0.0f || py != 0.0f) {
+            if (!Pointing) {
+                const POINT start = current ? Centre(current->rect) : POINT{(root->rect.right - root->rect.left) / 2, (root->rect.bottom - root->rect.top) / 2};
+                PointerX = static_cast<float>(start.x);
+                PointerY = static_cast<float>(start.y);
+                Pointing = true;
+                PlaceFrame(root, nullptr);
+            }
+            constexpr float Speed = 1100.0f;
+            PointerX = std::clamp(PointerX + px * Speed * seconds, 0.0f, static_cast<float>(root->rect.right - root->rect.left - 1));
+            PointerY = std::clamp(PointerY - py * Speed * seconds, 0.0f, static_cast<float>(root->rect.bottom - root->rect.top - 1));
+        } else if (Pointing && (dx != 0.0f || dy != 0.0f)) {
+            Pointing = false;
+            if (current) PlaceFrame(root, &current->rect);
+        }
+        if (Pointing && (static_cast<LONG>(PointerX) != PointerShown.x || static_cast<LONG>(PointerY) != PointerShown.y)) {
+            PointerShown = {static_cast<LONG>(PointerX), static_cast<LONG>(PointerY)};
+            MoveCursor({static_cast<int16_t>(PointerX), static_cast<int16_t>(PointerY), static_cast<int16_t>(PointerX + 1),
+                        static_cast<int16_t>(PointerY + 1)});
+        }
+        const Rect pointerRect{static_cast<int16_t>(PointerX), static_cast<int16_t>(PointerY),
+                               static_cast<int16_t>(PointerX + 1), static_cast<int16_t>(PointerY + 1)};
+        const Rect* aim = Pointing ? &pointerRect : current ? &current->rect : nullptr;
+        if (Pointing) dx = dy = 0.0f;
+
+        const bool fresh = (pressed & (XINPUT_GAMEPAD_DPAD_UP | XINPUT_GAMEPAD_DPAD_DOWN | XINPUT_GAMEPAD_DPAD_LEFT | XINPUT_GAMEPAD_DPAD_RIGHT)) != 0;
+        if ((dx != 0.0f || dy != 0.0f) && current && (fresh || static_cast<int32_t>(GetTickCount() - NextRepeat) >= 0)) {
+            if (const Target* next = Step(*current, dx, dy)) {
+                Select(root, next);
+                current = next;
+            }
+            NextRepeat = GetTickCount() + (fresh ? 350 : 160);
+        } else if (dx == 0.0f && dy == 0.0f) {
+            NextRepeat = 0;
+        }
+
+        // The game checks the real button between messages, so a tap sends down and up together.
+        if (aim && (pressed & XINPUT_GAMEPAD_A)) {
+            PressPending = true;
+            PressTick = tick;
+            PressRect = *aim;
+        }
+        if (PressPending && (buttons & XINPUT_GAMEPAD_A) && tick - PressTick >= 250) {
+            PressPending = false;
+            Holding = true;
+            MoveCursor(PressRect);
+            PostMouse(WM_LBUTTONDOWN, MK_LBUTTON, PressRect);
+        }
+        if (released & XINPUT_GAMEPAD_A) {
+            if (PressPending) {
+                const POINT at = Centre(PressRect), last = Centre(LastClickRect);
+                const bool twice = LastClickTick && tick - LastClickTick <= GetDoubleClickTime()
+                    && std::abs(at.x - last.x) <= 4 && std::abs(at.y - last.y) <= 4;
+                HWND window = FindGameWindow();
+                const bool doubleClicks = window && (GetClassLongA(window, GCL_STYLE) & CS_DBLCLKS) != 0;
+                PostMouse(WM_MOUSEMOVE, 0, PressRect);
+                PostMouse(twice && doubleClicks ? WM_LBUTTONDBLCLK : WM_LBUTTONDOWN, MK_LBUTTON, PressRect);
+                PostMouse(WM_LBUTTONUP, 0, PressRect);
+                LastClickTick = twice ? 0 : tick;
+                LastClickRect = PressRect;
+                PressPending = false;
+            } else if (Holding) {
+                PostMouse(WM_LBUTTONUP, 0, aim ? *aim : PressRect);
+                Holding = false;
+                if (!Pointing) RestoreCursor();
+            }
+        }
+        if (aim && (pressed & XINPUT_GAMEPAD_X)) {
+            PostMouse(WM_MOUSEMOVE, 0, *aim);
+            PostMouse(WM_RBUTTONDOWN, MK_RBUTTON, *aim);
+            PostMouse(WM_RBUTTONUP, 0, *aim);
+        }
+        if (pressed & XINPUT_GAMEPAD_B) PressKey(VK_ESCAPE);
+        if (pressed & XINPUT_GAMEPAD_Y) PressKey(VK_RETURN);
+        if (pressed & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER)) {
+            const std::vector<TLBSWidget*> windows = OpenWindows(root);
+            if (windows.size() > 1) {
+                const auto at = std::ranges::find(windows, Window);
+                const ptrdiff_t index = at == windows.end() ? 0 : at - windows.begin();
+                const ptrdiff_t step = (pressed & XINPUT_GAMEPAD_RIGHT_SHOULDER) ? 1 : -1;
+                Window = windows[(index + step + static_cast<ptrdiff_t>(windows.size())) % static_cast<ptrdiff_t>(windows.size())];
+                Selected = nullptr;
+                Manual = true;
+            }
+        }
+        return true;
+    }
+
+    void Close(const bool restoreCursor) {
+        if (Holding && Selected) PostMouse(WM_LBUTTONUP, 0, SelectedRect);
+        Holding = false;
+        Manual = false;
+        Pointing = false;
+        PointerTick = 0;
+        PointerShown = {-1, -1};
+        PressPending = false;
+        if (restoreCursor) RestoreCursor();
+        CursorSaved = false;
+        Window = nullptr;
+        Selected = nullptr;
+        Targets.clear();
+        for (TEWCustomPanelWidget* piece : Frame) {
+            if (piece && piece->isVisible) piece->isVisible = false;
+        }
+        FrameAround = {};
+    }
+
+    void Destroy() {
+        for (TEWCustomPanelWidget*& piece : Frame) {
+            if (piece) Overlay::Detach(piece);
+            piece = nullptr;
+        }
+        PointerShown = {-1, -1};
+        FrameRoot = nullptr;
+        FrameAround = {};
+    }
+}

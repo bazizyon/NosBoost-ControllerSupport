@@ -4,6 +4,7 @@
 #include "Targeting.h"
 #include "Safety.h"
 #include "Overlay.h"
+#include "Navigator.h"
 
 namespace ControllerSupport {
     bool WindowVisible = false;
@@ -17,6 +18,12 @@ namespace ControllerSupport {
         {TEWGraphicButtonWidget::ClassName, TEWGraphicButtonWidget::Version, TEWGraphicButtonWidget::ExpectedSize},
         {TEWCustomPanelWidget::ClassName, TEWCustomPanelWidget::Version, TEWCustomPanelWidget::ExpectedSize},
     };
+
+    bool GameFocused() {
+        DWORD process = 0;
+        GetWindowThreadProcessId(GetForegroundWindow(), &process);
+        return process == GetCurrentProcessId();
+    }
 
     bool EditModeActive() {
         return Overlay::EditMode;
@@ -114,6 +121,7 @@ extern "C" {
             Overlay::DragLabel = nullptr;
         }
         Overlay::AttachedRoot = nullptr;
+        Navigator::Destroy();
     }
 
     __declspec(dllexport) void ModEarlyTick(const TLBSWidget* RootWidget, const TickContext tickContext) {
@@ -130,14 +138,25 @@ extern "C" {
 
         PadState = {};
         PadResult = getState ? getState(0, &PadState) : ERROR_DEVICE_NOT_CONNECTED;
+        // Another window or another client has the focus, the gamepad isn't ours then.
+        if (!GameFocused()) {
+            PadState = {};
+            PadResult = ERROR_DEVICE_NOT_CONNECTED;
+        }
         UpdateInputMode(RootWidget);
         if (tickContext.isPlayerLoaded) {
-            Overlay::Update(const_cast<TLBSWidget*>(RootWidget), PadIsActive, PadState.Gamepad,
+            Overlay::Update(const_cast<TLBSWidget*>(RootWidget), PadIsActive && !Navigator::Window, PadState.Gamepad,
                             tickContext.mouseX, tickContext.mouseY);
         }
         if (PadResult != ERROR_SUCCESS || !tickContext.isPlayerLoaded) {
+            Navigator::Close(false);
             return;
         }
+        if (PadIsActive && !Overlay::EditMode && Navigator::Update(const_cast<TLBSWidget*>(RootWidget), PadState.Gamepad)) {
+            PreviousButtons = PadState.Gamepad.wButtons;
+            return;
+        }
+        if (!PadIsActive || Overlay::EditMode) Navigator::Close(false);
         UpdateCamera(DeltaSeconds, RootWidget);
         UpdateButtons(RootWidget);
 

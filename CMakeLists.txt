@@ -41,6 +41,7 @@ add_library(ControllerSupport SHARED
         ControllerSupport/EditMode.cpp
         ControllerSupport/Cast.cpp
         ControllerSupport/Overlay.cpp
+        ControllerSupport/Navigator.cpp
         ControllerSupport/resources.rc
         ${nosboost_modkit_SOURCE_DIR}/WidgetKit/WidgetKit.cpp
         ${imgui_SOURCE_DIR}/imgui.cpp

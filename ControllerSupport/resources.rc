@@ -1,4 +1,5 @@
 SLOT RCDATA "slot.png"
+FRAME RCDATA "frame.png"
 XBOX_BUTTON_COLOR_A RCDATA "xbox/xbox_button_color_a.png"
 XBOX_BUTTON_COLOR_B RCDATA "xbox/xbox_button_color_b.png"
 XBOX_BUTTON_COLOR_X RCDATA "xbox/xbox_button_color_x.png"
