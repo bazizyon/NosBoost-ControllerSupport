@@ -146,8 +146,21 @@ namespace ControllerSupport::Navigator {
     }
 
     // The bottom row's left button, which is confirm in the game's message boxes.
+    // Windows where the first thing to pick is at the top, not the confirm button.
+    constexpr const char* StartAtTop[] = {"TCharacterSelectWidget"};
+
     const Target* Primary() {
         const Target* best = nullptr;
+        for (const char* name : StartAtTop) {
+            if (!Window || !IsA(Window, name)) continue;
+            for (const Target& target : Targets) {
+                if (!best || target.rect.top < best->rect.top - 4
+                    || (std::abs(target.rect.top - best->rect.top) <= 4 && target.rect.left < best->rect.left)) {
+                    best = &target;
+                }
+            }
+            if (best) return best;
+        }
         for (const Target& target : Targets) {
             if (target.row == 0 && (!best || target.rect.left < best->rect.left)) best = &target;
         }
