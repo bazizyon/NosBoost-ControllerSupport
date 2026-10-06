@@ -19,6 +19,10 @@ namespace ControllerSupport::Overlay {
         HintLayerGlyphs[LTRT][1] = HintLayerGlyphs[RT][0];
         HintLayerGlyphs[LTRB][0] = HintLayerGlyphs[LT][0];
         HintLayerGlyphs[LTRB][1] = HintLayerGlyphs[RB][0];
+        HintLayerGlyphs[LBRB][0] = HintLayerGlyphs[LB][0];
+        HintLayerGlyphs[LBRB][1] = HintLayerGlyphs[RB][0];
+        HintLayerGlyphs[LBRT][0] = HintLayerGlyphs[LB][0];
+        HintLayerGlyphs[LBRT][1] = HintLayerGlyphs[RT][0];
     }
 
     void DestroyHint() {

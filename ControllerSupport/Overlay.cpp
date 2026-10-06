@@ -10,7 +10,11 @@ namespace ControllerSupport::Overlay {
         const bool lt = pad.bLeftTrigger > XINPUT_GAMEPAD_TRIGGER_THRESHOLD;
         const bool rt = pad.bRightTrigger > XINPUT_GAMEPAD_TRIGGER_THRESHOLD;
         if (lt && rt) return LTRT;
-        if (lt && (pad.wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER)) return LTRB;
+        const bool lb = (pad.wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER) != 0;
+        const bool rb = (pad.wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER) != 0;
+        if (lt && rb) return LTRB;
+        if (lb && rt) return LBRT;
+        if (lb && rb) return LBRB;
         if (lt) return LT;
         if (rt) return RT;
         if (pad.wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER) return LB;
@@ -38,7 +42,11 @@ namespace ControllerSupport::Overlay {
                       EditMode ? EditShift[layer] : 0, Bindings[layer]);
             }
             if (EditMode && Panels[RB].container) {
-                BuildPalette(root, Panels[RB].container->rect.right);
+                int16_t right = 0;
+                for (const Panel& panel : Panels) {
+                    if (panel.container) right = std::max(right, panel.container->rect.right);
+                }
+                BuildPalette(root, right);
                 BuildEditBoard(root);
             }
         }

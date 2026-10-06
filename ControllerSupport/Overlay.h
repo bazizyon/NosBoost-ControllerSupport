@@ -126,7 +126,7 @@ namespace ControllerSupport::Overlay {
     };
     constexpr uint8_t ItemKind = 2;
     constexpr uint8_t SkillKind = 3;
-    enum Layer { Base, RB, LT, RT, LB, LTRT, LTRB, LayerCount };
+    enum Layer { Base, RB, LT, RT, LB, LTRT, LTRB, LBRB, LBRT, LayerCount };
 
     // LT+RB always holds the game's linker popup, it isn't saved or editable.
     constexpr bool Fixed(const int layer) {
@@ -217,6 +217,7 @@ namespace ControllerSupport::Overlay {
         {PetsFollow, PetsStop, Chat, NoAction, PartnerSpecialist, PickUp, Specialist, Sit},
         {}, {}, {}, {},
         {Linker5, NoAction, NoAction, NoAction, Linker3, Linker1, Linker2, Linker4},
+        {}, {},
     };
 
     void ApplyDefaults();
@@ -281,11 +282,16 @@ namespace ControllerSupport::Overlay {
 
     void WatchRightClick(const int32_t mouseX, const int32_t mouseY);
 
-    constexpr int16_t EditColumn = (CrossGap + 2 * Step + SlotSize + 40) / 2;
+    // Three columns of three: Base RB LB, LT RT LT+RT, LT+RB LB+RB LB+RT from the bottom up.
+    constexpr int16_t EditColumn = CrossGap + 2 * Step + SlotSize + 10;
     constexpr int16_t EditRow = 2 * Step + SlotSize + 40;
-    constexpr int16_t EditShift[LayerCount] = {-EditColumn, EditColumn, -EditColumn, EditColumn, -EditColumn, EditColumn, -EditColumn};
-    constexpr int16_t EditLift[LayerCount] = {EditRaise, EditRaise, EditRaise + EditRow, EditRaise + EditRow,
-                                              EditRaise + 2 * EditRow, EditRaise + 2 * EditRow, EditRaise + 3 * EditRow};
+    // The palette sits to the right, everything moves left by half of it so the whole thing is centred.
+    constexpr int16_t EditPalette = 30 + 2 * Step;
+    constexpr int16_t EditLeft = -EditColumn - EditPalette / 2, EditMiddle = -EditPalette / 2, EditRight = EditColumn - EditPalette / 2;
+    constexpr int16_t EditShift[LayerCount] = {EditLeft, EditMiddle, EditLeft, EditMiddle, EditRight, EditRight, EditLeft, EditMiddle, EditRight};
+    constexpr int16_t EditLift[LayerCount] = {EditRaise, EditRaise, EditRaise + EditRow, EditRaise + EditRow, EditRaise,
+                                              EditRaise + EditRow, EditRaise + 2 * EditRow, EditRaise + 2 * EditRow,
+                                              EditRaise + 2 * EditRow};
 
     TNTTimeAniIcon* BarIcon(const TLBSWidget* root, const uint8_t action);
     void UpdateHint(TLBSWidget* root, bool shown);

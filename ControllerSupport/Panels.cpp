@@ -29,6 +29,10 @@ namespace ControllerSupport::Overlay {
         LayerGlyphs[LTRT][1] = LayerGlyphs[RT][0];
         LayerGlyphs[LTRB][0] = LayerGlyphs[LT][0];
         LayerGlyphs[LTRB][1] = LayerGlyphs[RB][0];
+        LayerGlyphs[LBRB][0] = LayerGlyphs[LB][0];
+        LayerGlyphs[LBRB][1] = LayerGlyphs[RB][0];
+        LayerGlyphs[LBRT][0] = LayerGlyphs[LB][0];
+        LayerGlyphs[LBRT][1] = LayerGlyphs[RT][0];
     }
 
     void Attach(TLBSWidget* parent, TLBSWidget* child) {
