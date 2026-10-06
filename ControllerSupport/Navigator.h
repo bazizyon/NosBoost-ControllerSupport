@@ -5,11 +5,13 @@ namespace ControllerSupport::Navigator {
     struct Target {
         TLBSWidget* widget;
         Rect rect;
+        int row = -1;
     };
 
     inline std::vector<Target> Targets;
     inline TLBSWidget* Window = nullptr;
     inline TLBSWidget* Selected = nullptr;
+    inline int SelectedRow = -1;
     inline Rect SelectedRect{};
     inline TEWCustomPanelWidget* Frame[8]{};
     inline TLBSWidget* FrameRoot = nullptr;

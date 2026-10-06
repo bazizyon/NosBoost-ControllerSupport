@@ -33,6 +33,25 @@ namespace ControllerSupport::Navigator {
         Collect(window, window->rect.left, window->rect.top, out);
     }
 
+    // Lists draw their own rows: +0x72 rows shown, +0x86 row height, +0x98 the entries, +0xA0 the first one shown.
+    // +0x76 is 0 on lists that only show text, like the bazaar's.
+    void CollectRows(TLBSWidget* list, const Rect& rect, std::vector<Target>& out) {
+        const auto* bytes = reinterpret_cast<const uint8_t*>(list);
+        if (!bytes[0x76]) return;
+        const uint16_t shown = *reinterpret_cast<const uint16_t*>(bytes + 0x72);
+        const uint16_t height = *reinterpret_cast<const uint16_t*>(bytes + 0x86);
+        const auto* entries = *reinterpret_cast<const uint8_t* const*>(bytes + 0x98);
+        const int32_t first = *reinterpret_cast<const int32_t*>(bytes + 0xA0);
+        if (!entries || !height || !IsA(reinterpret_cast<const TLBSWidget*>(entries), "TStringList")) return;
+        const int32_t count = *reinterpret_cast<const int32_t*>(entries + 0x14);
+        const int32_t rows = std::min<int32_t>(shown, count - std::clamp<int32_t>(first, 0, count));
+        for (int32_t row = 0; row < rows; row++) {
+            const auto top = static_cast<int16_t>(rect.top + row * height);
+            if (top + height > rect.bottom + 2) break;
+            out.push_back({list, {rect.left, top, rect.right, static_cast<int16_t>(top + height)}, row});
+        }
+    }
+
     void Collect(TLBSWidget* widget, const int16_t x, const int16_t y, std::vector<Target>& out) {
         if (!widget->childrenList || !widget->childrenList->list) return;
         for (uint32_t i = 0; i < widget->childrenList->count; i++) {
@@ -41,6 +60,7 @@ namespace ControllerSupport::Navigator {
             const Rect rect{static_cast<int16_t>(x + child->rect.left), static_cast<int16_t>(y + child->rect.top),
                             static_cast<int16_t>(x + child->rect.right), static_cast<int16_t>(y + child->rect.bottom)};
             if (Selectable(child)) out.push_back({child, rect});
+            if (IsA(child, "TEWStringListView")) CollectRows(child, rect, out);
             Collect(child, rect.left, rect.top, out);
         }
     }
@@ -100,6 +120,10 @@ namespace ControllerSupport::Navigator {
     const Target* Primary() {
         const Target* best = nullptr;
         for (const Target& target : Targets) {
+            if (target.row == 0 && (!best || target.rect.left < best->rect.left)) best = &target;
+        }
+        if (best) return best;
+        for (const Target& target : Targets) {
             if (!IsA(target.widget, "TEWCustomButtonWidget")) continue;
             if (!best || target.rect.bottom > best->rect.bottom + 4
                 || (std::abs(target.rect.bottom - best->rect.bottom) <= 4 && target.rect.left < best->rect.left)) {
@@ -111,7 +135,7 @@ namespace ControllerSupport::Navigator {
 
     const Target* Find(const TLBSWidget* widget) {
         for (const Target& target : Targets) {
-            if (target.widget == widget) return &target;
+            if (target.widget == widget && target.row == SelectedRow) return &target;
         }
         return nullptr;
     }
@@ -329,6 +353,7 @@ namespace ControllerSupport::Navigator {
 
     void Select(TLBSWidget* root, const Target* target) {
         Selected = target ? target->widget : nullptr;
+        SelectedRow = target ? target->row : -1;
         SelectedRect = target ? target->rect : Rect{};
         if (target && Holding) MoveCursor(target->rect);
         else if (target) PostMouse(WM_MOUSEMOVE, 0, target->rect);
