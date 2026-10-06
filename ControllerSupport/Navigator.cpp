@@ -65,6 +65,35 @@ namespace ControllerSupport::Navigator {
         }
     }
 
+    // A label or marker inside a button is a target of its own, keep only the button around it.
+    void DropNested(std::vector<Target>& targets) {
+        const auto area = [](const Rect& r) { return (r.right - r.left) * (r.bottom - r.top); };
+        const auto inside = [](const Rect& inner, const Rect& outer) {
+            return inner.left >= outer.left - 2 && inner.top >= outer.top - 2 && inner.right <= outer.right + 2
+                && inner.bottom <= outer.bottom + 2;
+        };
+        const auto close = [&](const Rect& inner, const Rect& outer) {
+            return inside(inner, outer) && area(outer) <= area(inner) * 4;
+        };
+        std::vector<bool> drop(targets.size());
+        // List rows stay, a hover widget over a row comes and goes with the selection.
+        for (size_t i = 0; i < targets.size(); i++) {
+            if (targets[i].row >= 0) continue;
+            for (size_t j = 0; j < targets.size() && !drop[i]; j++) {
+                if (i == j || drop[j]) continue;
+                const Rect& mine = targets[i].rect;
+                const Rect& other = targets[j].rect;
+                if (targets[j].row >= 0) drop[i] = close(mine, other) || close(other, mine);
+                else if (close(mine, other)) drop[i] = area(mine) < area(other) || j < i;
+            }
+        }
+        size_t kept = 0;
+        for (size_t i = 0; i < targets.size(); i++) {
+            if (!drop[i]) targets[kept++] = targets[i];
+        }
+        targets.resize(kept);
+    }
+
     // Only a window that just appeared with the focus, not one already on screen that the focus falls back to.
     TLBSWidget* FocusedWindow(TLBSWidget* root) {
         TLBSWidget* focus = root->someChild;
@@ -387,6 +416,7 @@ namespace ControllerSupport::Navigator {
         ShowLegend(root, true, always);
         Targets.clear();
         CollectWindow(window, Targets);
+        DropNested(Targets);
         if (window != Window) {
             Window = window;
             Holding = false;
