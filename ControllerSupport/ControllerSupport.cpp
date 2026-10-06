@@ -221,9 +221,21 @@ extern "C" {
             Overlay::Update(const_cast<TLBSWidget*>(RootWidget), PadIsActive && !Navigator::Window, PadState.Gamepad,
                             tickContext.mouseX, tickContext.mouseY);
         }
-        if (PadResult != ERROR_SUCCESS || !tickContext.isPlayerLoaded) {
+        if (PadResult != ERROR_SUCCESS) {
             Navigator::Close(false);
             return;
+        }
+        // Login, server and character selection have nothing but UI, so UI mode is always on there.
+        static bool wasInGame = false;
+        if (!tickContext.isPlayerLoaded) {
+            wasInGame = false;
+            if (PadIsActive) Navigator::Update(const_cast<TLBSWidget*>(RootWidget), PadState.Gamepad, true);
+            else Navigator::Close(false);
+            return;
+        }
+        if (!wasInGame) {
+            wasInGame = true;
+            Navigator::Close(false);
         }
         if (PadIsActive && !Overlay::EditMode && Navigator::Update(const_cast<TLBSWidget*>(RootWidget), PadState.Gamepad)) {
             PreviousButtons = PadState.Gamepad.wButtons;

@@ -312,9 +312,17 @@ namespace ControllerSupport::Navigator {
         Legend = legend;
     }
 
-    void ShowLegend(TLBSWidget* root, const bool shown) {
+    // The login and character screens have buttons where the in-game spot is, so the legend sits higher there.
+    void ShowLegend(TLBSWidget* root, const bool shown, const bool preGame) {
         if (shown && !Legend) BuildLegend(root);
         if (!Legend) return;
+        const auto top = static_cast<int16_t>(root->rect.bottom - root->rect.top - (Legend->rect.bottom - Legend->rect.top)
+                                              - (preGame ? 120 : 70));
+        if (Legend->rect.top != top) {
+            const auto height = static_cast<int16_t>(Legend->rect.bottom - Legend->rect.top);
+            Legend->rect.top = top;
+            Legend->rect.bottom = static_cast<int16_t>(top + height);
+        }
         if (Legend->isVisible != shown) Legend->isVisible = shown;
         if (shown) KeepOnTop(root, Legend);
     }
@@ -327,17 +335,17 @@ namespace ControllerSupport::Navigator {
         PlaceFrame(root, target ? &target->rect : nullptr);
     }
 
-    bool Update(TLBSWidget* root, const XINPUT_GAMEPAD& pad) {
+    bool Update(TLBSWidget* root, const XINPUT_GAMEPAD& pad, const bool always) {
         const bool viewDown = (pad.wButtons & XINPUT_GAMEPAD_BACK) != 0;
         const bool viewPressed = viewDown && !ViewWasDown;
         ViewWasDown = viewDown;
         TLBSWidget* window = FocusedWindow(root);
-        if (viewPressed && (Manual || Window)) {
+        if (viewPressed && (Manual || Window) && !always) {
             Close();
             PreviousButtons = pad.wButtons;
             return true;
         }
-        if (!window && (viewPressed || Manual)) {
+        if (!window && (viewPressed || Manual || always)) {
             const std::vector<TLBSWidget*> windows = OpenWindows(root);
             if (Manual && std::ranges::find(windows, Window) != windows.end()) {
                 window = Window;
@@ -351,7 +359,7 @@ namespace ControllerSupport::Navigator {
             Close();
             return false;
         }
-        ShowLegend(root, true);
+        ShowLegend(root, true, always);
         Targets.clear();
         CollectWindow(window, Targets);
         if (window != Window) {

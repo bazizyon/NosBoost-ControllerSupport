@@ -35,7 +35,7 @@ namespace ControllerSupport::Navigator {
     inline TLBSWidget* Legend = nullptr;
     inline std::vector<TLBSWidget*> ShownBefore;
 
-    bool Update(TLBSWidget* root, const XINPUT_GAMEPAD& pad);
+    bool Update(TLBSWidget* root, const XINPUT_GAMEPAD& pad, bool always = false);
     void Close(bool restoreCursor = true);
     void Destroy();
     TEWCustomPanelWidget* AddBoard(TLBSWidget* parent, int16_t width, int16_t height);
