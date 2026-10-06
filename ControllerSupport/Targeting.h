@@ -9,6 +9,9 @@ namespace ControllerSupport {
     };
 
     MapObjList* MonsterList(TSceneManager* scene);
+    MapObjList* NpcList(TSceneManager* scene);
+    TMapObjBase* NearestNpc(TSceneManager* scene, const TMapPlayerObj* player);
+    TMapObjBase* FindNpc(TSceneManager* scene, const uint32_t id);
     bool IsTargetable(const TMapObjBase* entity);
 
     constexpr float TargetRange = 22.0f;

@@ -120,6 +120,21 @@ namespace ControllerSupport {
         selectByIdFunction = FindPattern(SELECT_P, SELECT_MASK, nullptr, 0);
     }
 
+    // What the game calls once a clicked NPC is in reach: sends npc_req, or treq for a time-space stone.
+    void FindTalk() {
+        const BYTE TALK_P[] = {
+            0x55, 0x8B, 0xEC, 0x33, 0xC9, 0x51, 0x51, 0x51, 0x51, 0x51, 0x51, 0x53, 0x8B, 0xDA, 0x33, 0xC0, 0x55, 0x68,
+            0x00, 0x00, 0x00, 0x00, 0x64, 0xFF, 0x30, 0x64, 0x89, 0x20, 0x8B, 0xC3, 0xE8, 0x00, 0x00, 0x00, 0x00,
+            0x84, 0xC0, 0x0F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x8B, 0xC3, 0xE8, 0x00, 0x00, 0x00, 0x00, 0x84, 0xC0, 0x74
+        };
+        const auto TALK_MASK = "xxxxxxxxxxxxxxxxxx????xxxxxxxxx????xxxx????xxx????xxx";
+        talkFunction = FindPattern(TALK_P, TALK_MASK, nullptr, 0);
+        const BYTE OWNER_P[] = {0xA1, 0x00, 0x00, 0x00, 0x00, 0x8B, 0x00, 0x8B, 0xD6, 0xE8, 0x00, 0x00, 0x00, 0x00, 0xC6, 0x45, 0x14, 0x00};
+        const auto OWNER_MASK = "x????xxxxx????xxxx";
+        const uintptr_t match = FindPattern(OWNER_P, OWNER_MASK, nullptr, 1);
+        talkOwnerGlobal = match ? *reinterpret_cast<uintptr_t*>(match) : 0;
+    }
+
     void FindWalkTargetGlobal() {
         const BYTE WALK_TARGET_P[] = {
             0x33, 0xD2,
@@ -333,6 +348,19 @@ namespace ControllerSupport {
         uintptr_t function = selectByIdFunction;
         _asm {
             mov eax, self
+            call function
+        }
+    }
+
+    __declspec(noinline) void TalkTo(const TMapObjBase* npc) {
+        if (!GameCallsAllowed || !talkFunction || !talkOwnerGlobal || !npc) return;
+        const uintptr_t holder = *reinterpret_cast<uintptr_t*>(talkOwnerGlobal);
+        const uintptr_t owner = holder ? *reinterpret_cast<uintptr_t*>(holder) : 0;
+        if (!owner) return;
+        uintptr_t function = talkFunction;
+        _asm {
+            mov eax, owner
+            mov edx, npc
             call function
         }
     }

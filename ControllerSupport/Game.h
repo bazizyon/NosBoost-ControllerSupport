@@ -32,6 +32,8 @@ namespace ControllerSupport {
     inline uintptr_t petsFollowFunction;
     inline uintptr_t stopActionFunction;
     inline uintptr_t selectByIdFunction;
+    inline uintptr_t talkFunction;
+    inline uintptr_t talkOwnerGlobal;
     inline uintptr_t walkTargetGlobal;
     inline TLBSWidget* naviWidget = nullptr;
 
@@ -46,6 +48,7 @@ namespace ControllerSupport {
     void FindPetsFollow();
     void FindStopAction();
     void FindSelectById();
+    void FindTalk();
     void FindWalkTargetGlobal();
     void ClearWalkTarget();
     bool PlayerMayMove(const TLBSWidget* navi);
@@ -64,6 +67,7 @@ namespace ControllerSupport {
     __declspec(noinline) void PetsFollow(TLBSWidget* navi, int x, int y);
     __declspec(noinline) void StopAction();
     __declspec(noinline) void SelectTarget(const TMapObjBase* entity);
+    __declspec(noinline) void TalkTo(const TMapObjBase* npc);
     void MoveTo(int x, int y);
     int LoadUiImageResource(const char* name, uint16_t& width, uint16_t& height);
 }

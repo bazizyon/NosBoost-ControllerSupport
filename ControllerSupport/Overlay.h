@@ -56,7 +56,7 @@ namespace ControllerSupport::Overlay {
     enum Action : uint8_t {
         NoAction, Attack, ClearTarget, NextTarget, PrevTarget, BossTarget, PickUp, Sit, Specialist,
         PartnerSpecialist, PetsFollow, PetsStop, Chat, PetSkill1, PetSkill2, PetSkill3, PartnerSkill1, PartnerSkill2,
-        PartnerSkill3, Linker1, Linker2, Linker3, Linker4, Linker5, ActionCount
+        PartnerSkill3, Linker1, Linker2, Linker3, Linker4, Linker5, TalkToNpc, ModsMenu, ActionCount
     };
     struct ActionLook {
         const wchar_t* text;
@@ -89,13 +89,22 @@ namespace ControllerSupport::Overlay {
         {L"Linker 3", nullptr, 0, L""},
         {L"Linker 4", nullptr, 0, L""},
         {L"Linker 5", nullptr, 0, L""},
+        {L"Talk to\nNPC or\nTS stone", nullptr, 0, L""},
+        {L"Open\nmods\nmenu", nullptr, 0, L""},
     };
+
+    // The linker slots only belong on the fixed LT+RB layer.
+    constexpr bool InPalette(const int id) {
+        return id > NoAction && id < ActionCount && (id < Linker1 || id > Linker5);
+    }
+    constexpr int PaletteCount = ActionCount - 1 - (Linker5 - Linker1 + 1);
 
     bool IsBarSkill(const uint8_t action);
 
     struct SlotView {
         Rect rect{};
-        TEWLabel* text = nullptr;
+        TEWLabel* text[3]{};
+        int16_t textTop = 0;
         TEWLabel* caption = nullptr;
         TEWCustomPanelWidget* actionIcon = nullptr;
         TNTTimeAniIcon* icon = nullptr;
@@ -150,6 +159,9 @@ namespace ControllerSupport::Overlay {
     void Detach(TLBSWidget* widget);
     TEWLabel* AddLabel(TLBSWidget* parent, const int16_t x, const int16_t textY, const int16_t width,
                        const uint8_t alignment, const wchar_t* text);
+    void SetLines(TEWLabel* const (&lines)[3], const wchar_t* text, const int16_t top);
+    void AddLines(TLBSWidget* parent, const int16_t x, const int16_t top, const int16_t width, const wchar_t* text);
+    std::wstring OneLine(const wchar_t* text);
     TEWControlWidget* AddSprite(TLBSWidget* parent, const int image, const AtlasFrame& frame, const int16_t x,
                                 const int16_t y, const int16_t imageWidth = 512, const int16_t imageHeight = 512);
     TEWControlWidget* AddImage(TLBSWidget* parent, const Image& image, const int16_t x, const int16_t y);

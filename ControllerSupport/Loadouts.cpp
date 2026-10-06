@@ -93,7 +93,7 @@ namespace ControllerSupport::Overlay {
                     ApplyBinding(Panels[layer].slots[cell], binding);
                     continue;
                 }
-                if (std::sscanf(value, "A,%d", &kind) == 1 && kind > NoAction && kind < Linker1) {
+                if (std::sscanf(value, "A,%d", &kind) == 1 && InPalette(kind)) {
                     Binding& binding = Bindings[layer][cell];
                     binding.set = true;
                     binding.action = static_cast<uint8_t>(kind);

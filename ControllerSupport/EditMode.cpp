@@ -40,7 +40,8 @@ namespace ControllerSupport::Overlay {
     }
 
     void HighlightSelection() {
-        for (int id = 1; id < Linker1; id++) {
+        for (int id = 1; id < ActionCount; id++) {
+            if (!InPalette(id)) continue;
             if (!PaletteTiles[id]) continue;
             const bool selected = id == SelectedAction;
             PaletteTiles[id]->color = selected ? Color(255, 255, 220, 120) : Color(255, 255, 255, 255);
@@ -60,7 +61,7 @@ namespace ControllerSupport::Overlay {
     }
 
     void BuildPalette(TLBSWidget* root, const int16_t panelsRight) {
-        constexpr int Rows = Linker1 / 2;
+        constexpr int Rows = (PaletteCount + 1) / 2;
         const int16_t height = static_cast<int16_t>(Rows * Step + 30);
         const int16_t left = static_cast<int16_t>(panelsRight + 30);
         const int16_t top = static_cast<int16_t>(root->rect.bottom - root->rect.top - BottomMargin - Step - SlotSize / 2 - height + SlotSize + 2 * Step - EditRaise);
@@ -70,9 +71,12 @@ namespace ControllerSupport::Overlay {
         Attach(root, container);
         PaletteContainer = container;
         AddLabel(container, 0, 0, 2 * Step, 3, L"Actions");
-        for (int id = 1; id < Linker1; id++) {
-            const int16_t x = static_cast<int16_t>(((id - 1) % 2) * Step);
-            const int16_t y = static_cast<int16_t>(24 + ((id - 1) / 2) * Step);
+        int placed = 0;
+        for (int id = 1; id < ActionCount; id++) {
+            if (!InPalette(id)) continue;
+            const int16_t x = static_cast<int16_t>((placed % 2) * Step);
+            const int16_t y = static_cast<int16_t>(24 + (placed / 2) * Step);
+            placed++;
             PaletteRefs[id] = static_cast<uint8_t>(id);
             PaletteTiles[id] = AddSquareButton(container, x, y, &OnPaletteClick, &PaletteRefs[id]);
             PaletteRects[id] = {static_cast<int16_t>(left + x), static_cast<int16_t>(top + y),
@@ -98,7 +102,7 @@ namespace ControllerSupport::Overlay {
                     PaletteMotions[id] = icon;
                 }
             } else {
-                AddLabel(container, static_cast<int16_t>(x - 8), static_cast<int16_t>(y + SlotSize / 2 - 6), SlotSize + 16, 3, look.text);
+                AddLines(container, static_cast<int16_t>(x - 8), static_cast<int16_t>(y + SlotSize / 2 - 6), SlotSize + 16, look.text);
             }
             if (look.caption[0]) {
                 AddLabel(container, static_cast<int16_t>(x - 8), static_cast<int16_t>(y + SlotSize - 22), SlotSize + 16, 3, look.caption);
@@ -180,7 +184,8 @@ namespace ControllerSupport::Overlay {
     void WatchPaletteDrag(TLBSWidget* root, const int32_t mouseX, const int32_t mouseY) {
         const bool down = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
         if (down && !LeftWasDown) {
-            for (int id = 1; id < Linker1; id++) {
+            for (int id = 1; id < ActionCount; id++) {
+            if (!InPalette(id)) continue;
                 if (PaletteTiles[id] && Contains(PaletteRects[id], mouseX, mouseY)) {
                     DraggedAction = static_cast<uint8_t>(id);
                     DragStartX = mouseX;
@@ -190,7 +195,7 @@ namespace ControllerSupport::Overlay {
         }
         const bool moved = DraggedAction && (std::abs(mouseX - DragStartX) > 4 || std::abs(mouseY - DragStartY) > 4);
         if (down && moved) {
-            if (!DragLabel && (DragLabel = AddLabel(root, 0, 0, 80, 3, Actions[DraggedAction].text))) {
+            if (!DragLabel && (DragLabel = AddLabel(root, 0, 0, 80, 3, OneLine(Actions[DraggedAction].text).c_str()))) {
                 DragLabel->textColor = Color(255, 255, 220, 120);
             }
             if (DragLabel) {

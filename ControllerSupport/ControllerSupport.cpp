@@ -33,6 +33,21 @@ namespace ControllerSupport {
 
     WORD PreviousButtons = 0;
 
+    // Like clicking an NPC that's already in reach, nothing happens if none is. Reach is under 4 cells in a straight line.
+    constexpr int TalkReachSquared = 13;
+
+    void TalkToNearestNpc() {
+        TSceneManager* scene = GetSceneManager();
+        if (!scene || !scene->mapPlayerObjPtr) return;
+        const TMapPlayerObj* player = scene->mapPlayerObjPtr;
+        TMapObjBase* npc = NearestNpc(scene, player);
+        if (!npc) return;
+        const int dx = npc->xPosition - player->xPosition, dy = npc->yPosition - player->yPosition;
+        if (dx * dx + dy * dy > TalkReachSquared) return;
+        SelectTarget(npc);
+        TalkTo(npc);
+    }
+
     void RunAction(const uint8_t action, const TLBSWidget* root) {
         switch (action) {
             case Overlay::Attack: PressKey(VK_SPACE); PauseMovement(); break;
@@ -47,6 +62,8 @@ namespace ControllerSupport {
             case Overlay::PetsFollow: PressKey('D'); PauseMovement(); break;
             case Overlay::PetsStop: PressKey('S'); PauseMovement(); break;
             case Overlay::Chat: PressKey(VK_RETURN); break;
+            case Overlay::ModsMenu: PressKey(VK_F9); break;
+            case Overlay::TalkToNpc: TalkToNearestNpc(); break;
             default: break;
         }
     }
@@ -177,11 +194,12 @@ extern "C" {
         FindPetsFollow();
         FindStopAction();
         FindSelectById();
+        FindTalk();
 
         FindWalkTargetGlobal();
         Safety::Verify(Host, {{"RotateBy", rotateByFunction}, {"MoveTo", moveFunction},
                               {"pet command", petsFollowFunction}, {"stop action", stopActionFunction},
-                              {"select by id", selectByIdFunction}, {"cooldown sweep", Overlay::FindSetElapsed()},
+                              {"select by id", selectByIdFunction}, {"npc talk", talkFunction}, {"cooldown sweep", Overlay::FindSetElapsed()},
                               {"cooldown length", Overlay::FindSetLength()}, {"cooldown running", Overlay::FindSetRunning()}});
         LoadXInput();
     }

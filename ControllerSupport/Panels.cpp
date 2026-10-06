@@ -60,6 +60,44 @@ namespace ControllerSupport::Overlay {
         return label;
     }
 
+    // Action names are up to three lines split on '\n', kept centred on where a single line would sit.
+    constexpr int16_t LineHeight = 12;
+
+    int LineCount(const wchar_t* text) {
+        int count = 1;
+        for (const wchar_t* c = text; *c; c++) count += *c == L'\n';
+        return std::min(count, 3);
+    }
+
+    void SetLines(TEWLabel* const (&lines)[3], const wchar_t* text, const int16_t top) {
+        const int count = LineCount(text);
+        const wchar_t* start = text;
+        for (int i = 0; i < 3; i++) {
+            const wchar_t* end = start;
+            while (*end && *end != L'\n') end++;
+            const std::wstring line = i < count ? std::wstring(start, end) : std::wstring();
+            if (*end) start = end + 1;
+            else start = end;
+            if (!lines[i]) continue;
+            lines[i]->SetText(line.c_str());
+            const auto y = static_cast<int16_t>(top - (count - 1) * LineHeight / 2 + i * LineHeight + TextNudge);
+            lines[i]->rect.bottom = static_cast<int16_t>(y + (lines[i]->rect.bottom - lines[i]->rect.top));
+            lines[i]->rect.top = y;
+        }
+    }
+
+    void AddLines(TLBSWidget* parent, const int16_t x, const int16_t top, const int16_t width, const wchar_t* text) {
+        TEWLabel* lines[3]{};
+        for (int i = 0; i < LineCount(text); i++) lines[i] = AddLabel(parent, x, top, width, 3, L"");
+        SetLines(lines, text, top);
+    }
+
+    std::wstring OneLine(const wchar_t* text) {
+        std::wstring line(text);
+        std::ranges::replace(line, L'\n', L' ');
+        return line;
+    }
+
     TEWControlWidget* AddSprite(TLBSWidget* parent, const int image, const AtlasFrame& frame, const int16_t x,
                                 const int16_t y, const int16_t imageWidth, const int16_t imageHeight) {
         auto* sprite = Widget::Create<TEWControlWidget>(CachedHost);
@@ -109,7 +147,7 @@ namespace ControllerSupport::Overlay {
 
     void ApplyBinding(SlotView& slot, const Binding& binding) {
         const ActionLook& look = Actions[binding.set ? binding.action : NoAction];
-        if (slot.text) slot.text->SetText(look.text);
+        SetLines(slot.text, look.text, slot.textTop);
         if (slot.caption) slot.caption->SetText(look.caption);
         if (slot.actionIcon && look.sprite) PlacePicture(slot.actionIcon, *look.sprite, -GlyphOffset, -GlyphOffset, look.caption[0]);
         slot.motion = 0;
@@ -188,7 +226,8 @@ namespace ControllerSupport::Overlay {
             AddSquareButton(group, In, In, &OnSlotClick, &SlotRefs[layer][i]);
             slot.actionIcon = AddPicture(group, PetFollowSprite, In, In, false);
             if (slot.actionIcon) slot.actionIcon->isVisible = false;
-            slot.text = AddLabel(group, In - 8, In + SlotSize / 2 - 2, SlotSize + 16, 3, L"");
+            slot.textTop = static_cast<int16_t>(In + SlotSize / 2 - 2);
+            for (TEWLabel*& line : slot.text) line = AddLabel(group, In - 8, slot.textTop, SlotSize + 16, 3, L"");
             if (auto* icon = Widget::Create<TNTTimeAniIcon>(CachedHost)) {
                 InitCooldownFields(icon, root);
                 constexpr int16_t IconInset = 4;
@@ -229,7 +268,7 @@ namespace ControllerSupport::Overlay {
         SetShown(slot.icon, skill || motion);
         SetShown(slot.actionIcon, pictured);
         SetShown(slot.caption, action && look.caption[0]);
-        SetShown(slot.text, action && !pictured && !motion);
+        for (TEWLabel* line : slot.text) SetShown(line, action && !pictured && !motion);
     }
 
     void Show(Panel& panel, const bool shown, const Binding (&bindings)[8]) {

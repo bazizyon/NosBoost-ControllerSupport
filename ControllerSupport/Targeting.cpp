@@ -10,6 +10,40 @@ namespace ControllerSupport {
         return *reinterpret_cast<MapObjList**>(reinterpret_cast<uintptr_t>(scene) + 0x10);
     }
 
+    MapObjList* NpcList(TSceneManager* scene) {
+        return *reinterpret_cast<MapObjList**>(reinterpret_cast<uintptr_t>(scene) + 0x14);
+    }
+
+    TMapObjBase* NearestNpc(TSceneManager* scene, const TMapPlayerObj* player) {
+        MapObjList* list = NpcList(scene);
+        if (!list || !list->items) return nullptr;
+        TMapObjBase* best = nullptr;
+        float bestDistance = TargetRange;
+        for (uint32_t i = 0; i < list->count; i++) {
+            TMapObjBase* entity = list->items[i];
+            // Pets and partners are in the same list, +0x164 holds their owner, -1 for an NPC.
+            if (!IsTargetable(entity) || *reinterpret_cast<const int32_t*>(reinterpret_cast<const uint8_t*>(entity) + 0x164) != -1) continue;
+            const float dx = static_cast<float>(entity->xPosition) - player->xPosition;
+            const float dy = static_cast<float>(entity->yPosition) - player->yPosition;
+            const float distance = std::sqrt(dx * dx + dy * dy);
+            if (distance <= bestDistance) {
+                best = entity;
+                bestDistance = distance;
+            }
+        }
+        return best;
+    }
+
+    TMapObjBase* FindNpc(TSceneManager* scene, const uint32_t id) {
+        MapObjList* list = NpcList(scene);
+        if (!list || !list->items) return nullptr;
+        for (uint32_t i = 0; i < list->count; i++) {
+            TMapObjBase* entity = list->items[i];
+            if (entity && entity->objectID == id) return IsTargetable(entity) ? entity : nullptr;
+        }
+        return nullptr;
+    }
+
     bool IsTargetable(const TMapObjBase* entity) {
         const auto* bytes = reinterpret_cast<const uint8_t*>(entity);
         return entity && bytes[0x33] != 0 && bytes[0xA9] != 4;
