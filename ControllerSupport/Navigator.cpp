@@ -382,10 +382,14 @@ namespace ControllerSupport::Navigator {
     void ShowLegend(TLBSWidget* root, const bool shown, const bool preGame) {
         if (shown && !Legend) BuildLegend(root);
         if (!Legend) return;
-        const auto top = static_cast<int16_t>(root->rect.bottom - root->rect.top - (Legend->rect.bottom - Legend->rect.top)
-                                              - (preGame ? 120 : 70));
+        const auto height = static_cast<int16_t>(Legend->rect.bottom - Legend->rect.top);
+        auto top = static_cast<int16_t>(root->rect.bottom - root->rect.top - height - (preGame ? 120 : 70));
+        // Never over the window being used, like the NPC conversation at the bottom of the screen.
+        if (Window && Window->rect.bottom > top && Window->rect.top < top + height && Window->rect.left < Legend->rect.right
+            && Window->rect.right > Legend->rect.left && Window->rect.top - height - 8 >= 0) {
+            top = static_cast<int16_t>(Window->rect.top - height - 8);
+        }
         if (Legend->rect.top != top) {
-            const auto height = static_cast<int16_t>(Legend->rect.bottom - Legend->rect.top);
             Legend->rect.top = top;
             Legend->rect.bottom = static_cast<int16_t>(top + height);
         }
