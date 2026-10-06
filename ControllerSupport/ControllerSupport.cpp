@@ -71,6 +71,78 @@ namespace ControllerSupport {
 
     int MaxObservedStickValue = 26000;
     float MaxMoveDistance = 7.0f;
+
+    bool OldMovement = false;
+    bool StopOnRelease = true;
+    float Lookahead = 7.0f;
+    float FineTilt = 0.25f;
+    bool WasWalking = false;
+    int TargetX = 0, TargetY = 0;
+    float WalkDirX = 0.0f, WalkDirY = 0.0f;
+    std::chrono::steady_clock::time_point LastWalkSent{};
+    float DrawnX = 0.0f, DrawnY = 0.0f, DrawnStepX = 0.0f, DrawnStepY = 0.0f;
+
+    // The game's own click-to-walk steps (the guarded walk does these too), dead players excluded.
+    void WalkTo(const TLBSWidget* root, const int x, const int y) {
+        TSceneManager* Scene = GetSceneManager();
+        if (!Scene || !Scene->mapPlayerObjPtr) return;
+        // Dead: the respawn box takes the click, so the game sends nothing, not even pet moves.
+        if (reinterpret_cast<const uint8_t*>(Scene->mapPlayerObjPtr)[0xA9] == 4) return;
+        TLBSWidget* navi = FindNaviWidget(root);
+        ClearWalkTarget();
+        if (PlayerMayMove(navi)) {
+            StopAction();
+            MoveTo(x, y);
+        }
+        PetsFollow(navi, x, y);
+    }
+
+    // Sends a new target only when the direction turns or the old one is nearly reached, and stops where the stick is let go.
+    void SmoothWalk(const TLBSWidget* root, const float moveX, const float moveY, const float tilt) {
+        TSceneManager* Scene = GetSceneManager();
+        if (!Scene || !Scene->mapPlayerObjPtr) return;
+        const int x = Scene->mapPlayerObjPtr->xPosition, y = Scene->mapPlayerObjPtr->yPosition;
+        const auto now = std::chrono::steady_clock::now();
+        // The cell field trails the drawn character. The drawn position (+0x58, +0x60) is the cell centre in half cells.
+        const auto* player = reinterpret_cast<const uint8_t*>(Scene->mapPlayerObjPtr);
+        const float drawnX = *reinterpret_cast<const float*>(player + 0x58) * 2.0f - 0.5f;
+        const float drawnY = *reinterpret_cast<const float*>(player + 0x60) * 2.0f - 0.5f;
+        if (std::abs(drawnX - DrawnX) > 0.001f || std::abs(drawnY - DrawnY) > 0.001f) {
+            DrawnStepX = drawnX - DrawnX;
+            DrawnStepY = drawnY - DrawnY;
+        }
+        DrawnX = drawnX;
+        DrawnY = drawnY;
+        if (tilt <= 0.0f) {
+            // Stop on the first cell the character is walking into, never back on the one it's leaving.
+            if (WasWalking && StopOnRelease) {
+                const auto next = [](const float at, const float step) {
+                    return static_cast<int>(step > 0.001f ? std::ceil(at) : step < -0.001f ? std::floor(at) : std::round(at));
+                };
+                const int stopX = next(drawnX, DrawnStepX), stopY = next(drawnY, DrawnStepY);
+                WalkTo(root, std::abs(stopX - x) <= 1 ? stopX : x, std::abs(stopY - y) <= 1 ? stopY : y);
+            }
+            WasWalking = false;
+            return;
+        }
+        const float length = std::sqrt(moveX * moveX + moveY * moveY);
+        const float dirX = moveX / length, dirY = -moveY / length;
+        const float distance = tilt < FineTilt ? 1.0f : Lookahead;
+        const int targetX = x + static_cast<int>(std::round(dirX * distance));
+        const int targetY = y + static_cast<int>(std::round(dirY * distance));
+        if (targetX == x && targetY == y) return;
+        const bool turned = dirX * WalkDirX + dirY * WalkDirY < 0.94f;
+        const bool arriving = std::abs(TargetX - x) <= 1 && std::abs(TargetY - y) <= 1;
+        if (WasWalking && !turned && !arriving) return;
+        if (now - LastWalkSent < std::chrono::milliseconds(100)) return;
+        WalkTo(root, targetX, targetY);
+        WasWalking = true;
+        TargetX = targetX;
+        TargetY = targetY;
+        WalkDirX = dirX;
+        WalkDirY = dirY;
+        LastWalkSent = now;
+    }
     std::chrono::steady_clock::time_point NextMoveAllowedAt{};
     std::mt19937 MoveRng{std::random_device{}()};
 
@@ -166,6 +238,26 @@ extern "C" {
         const float LeftMagnitude = std::sqrt(static_cast<float>(StickX) * StickX + static_cast<float>(StickY) * StickY);
         MaxObservedStickValue = std::max({MaxObservedStickValue, std::abs(static_cast<int>(StickX)), std::abs(static_cast<int>(StickY))});
 
+        if (!OldMovement) {
+            float MoveX = static_cast<float>(StickX) / MaxObservedStickValue;
+            float MoveY = static_cast<float>(StickY) / MaxObservedStickValue;
+            if (CameraRelativeMovement) {
+                const float Angle = (CameraYaw() - ForwardYaw) * (FlipMovementRotation ? -1.0f : 1.0f);
+                const float RotatedX = MoveX * std::cos(Angle) - MoveY * std::sin(Angle);
+                const float RotatedY = MoveX * std::sin(Angle) + MoveY * std::cos(Angle);
+                MoveX = RotatedX;
+                MoveY = RotatedY;
+            }
+            // A skill was just cast, a stop here would cancel it.
+            if (Now < MovementPausedUntil) {
+                WasWalking = false;
+                return;
+            }
+            const bool Held = LeftMagnitude > LeftStickDeadzone;
+            const float Tilt = Held ? std::min((LeftMagnitude - LeftStickDeadzone) / (MaxObservedStickValue - LeftStickDeadzone), 1.0f) : 0.0f;
+            SmoothWalk(RootWidget, MoveX, MoveY, Tilt);
+            return;
+        }
         if (LeftMagnitude > LeftStickDeadzone && Now >= NextMoveAllowedAt && Now >= MovementPausedUntil) {
             float MoveX = static_cast<float>(StickX) / MaxObservedStickValue;
             float MoveY = static_cast<float>(StickY) / MaxObservedStickValue;
@@ -185,20 +277,7 @@ extern "C" {
                 if (!Scene || !Scene->mapPlayerObjPtr) {
                     return;
                 }
-                const auto& player = Scene->mapPlayerObjPtr;
-                // Dead: the respawn box takes the click, so the game sends nothing, not even pet moves.
-                if (reinterpret_cast<const uint8_t*>(player)[0xA9] == 4) {
-                    return;
-                }
-                const int CurrentX = player->xPosition;
-                const int CurrentY = player->yPosition;
-                TLBSWidget* navi = FindNaviWidget(RootWidget);
-                ClearWalkTarget();
-                if (PlayerMayMove(navi)) {
-                    StopAction();
-                    MoveTo(CurrentX + DX, CurrentY + DY);
-                }
-                PetsFollow(navi, CurrentX + DX, CurrentY + DY);
+                WalkTo(RootWidget, Scene->mapPlayerObjPtr->xPosition + DX, Scene->mapPlayerObjPtr->yPosition + DY);
                 NextMoveAllowedAt = Now + RollMoveCooldown();
             }
         }
@@ -222,6 +301,12 @@ extern "C" {
             ImGui::Checkbox("Direct camera", &DirectCamera);
             ImGui::Checkbox("Edit gamepad bars (drag skills onto the slots)", &Overlay::EditMode);
             ImGui::SliderFloat("Stick pause after action (s)", &ActionMovementPause, 0.0f, 1.0f);
+            ImGui::Checkbox("Old movement", &OldMovement);
+            if (!OldMovement) {
+                ImGui::Checkbox("Stop where the stick is let go", &StopOnRelease);
+                ImGui::SliderFloat("Cells ahead", &Lookahead, 1.0f, 9.0f, "%.0f");
+                ImGui::SliderFloat("Light tilt below (1 cell steps)", &FineTilt, 0.0f, 1.0f);
+            }
             if (ImGui::Button("Press Space (test)")) {
                 PendingKey = VK_SPACE;
             }
