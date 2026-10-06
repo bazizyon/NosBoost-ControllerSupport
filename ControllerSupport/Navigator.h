@@ -37,6 +37,7 @@ namespace ControllerSupport::Navigator {
     inline TLBSWidget* Legend = nullptr;
     inline std::vector<TLBSWidget*> ShownBefore;
 
+    bool IsA(const TLBSWidget* widget, const char* name);
     bool Update(TLBSWidget* root, const XINPUT_GAMEPAD& pad, bool always = false);
     void Close(bool restoreCursor = true);
     void Destroy();

@@ -5,6 +5,8 @@
 #include "Safety.h"
 #include "Overlay.h"
 #include "Navigator.h"
+#include "Radial.h"
+#include "Clients.h"
 
 namespace ControllerSupport {
     bool WindowVisible = false;
@@ -194,6 +196,8 @@ extern "C" {
         }
         Overlay::AttachedRoot = nullptr;
         Navigator::Destroy();
+        Radial::Destroy();
+        Clients::Withdraw();
         Overlay::DestroyHint();
     }
 
@@ -212,28 +216,45 @@ extern "C" {
         PadState = {};
         PadResult = getState ? getState(0, &PadState) : ERROR_DEVICE_NOT_CONNECTED;
         // Another window or another client has the focus, the gamepad isn't ours then.
-        if (!GameFocused()) {
+        static bool wasFocused = false;
+        const bool focused = GameFocused();
+        if (!focused) {
             PadState = {};
             PadResult = ERROR_DEVICE_NOT_CONNECTED;
         }
+        // Coming from another client the sticks may still be tilted from picking it.
+        if (focused && !wasFocused) Radial::StartSettle();
+        wasFocused = focused;
         UpdateInputMode(RootWidget);
         const TSceneManager* scene = GetSceneManager();
         const bool inGame = tickContext.isPlayerLoaded && scene && scene->mapPlayerObjPtr;
         if (inGame) {
-            Overlay::Update(const_cast<TLBSWidget*>(RootWidget), PadIsActive && !Navigator::Window, PadState.Gamepad,
+            Overlay::Update(const_cast<TLBSWidget*>(RootWidget), PadIsActive && !Navigator::Window && !Radial::HidesBars(), PadState.Gamepad,
                             tickContext.mouseX, tickContext.mouseY);
         } else {
             Overlay::HideAll(const_cast<TLBSWidget*>(RootWidget));
         }
+        Clients::Publish(inGame ? Overlay::CharacterName : std::string());
+        if (PadResult != ERROR_SUCCESS) Radial::Hide(RootWidget);
         if (PadResult != ERROR_SUCCESS) {
             Navigator::Close(false);
             return;
         }
+        XINPUT_GAMEPAD pad = PadState.Gamepad;
+        if (PadIsActive && !Overlay::EditMode && Radial::Update(const_cast<TLBSWidget*>(RootWidget), pad, inGame)) {
+            PreviousButtons = PadState.Gamepad.wButtons;
+            return;
+        }
+        Radial::Settle(pad);
+        PadState.Gamepad.sThumbLX = pad.sThumbLX;
+        PadState.Gamepad.sThumbLY = pad.sThumbLY;
+        PadState.Gamepad.sThumbRX = pad.sThumbRX;
+        PadState.Gamepad.sThumbRY = pad.sThumbRY;
         // Login, server and character selection have nothing but UI, so UI mode is always on there.
         static bool wasInGame = false;
         if (!inGame) {
             wasInGame = false;
-            if (PadIsActive) Navigator::Update(const_cast<TLBSWidget*>(RootWidget), PadState.Gamepad, true);
+            if (PadIsActive) Navigator::Update(const_cast<TLBSWidget*>(RootWidget), pad, true);
             else Navigator::Close(false);
             return;
         }
@@ -241,7 +262,7 @@ extern "C" {
             wasInGame = true;
             Navigator::Close(false);
         }
-        if (PadIsActive && !Overlay::EditMode && Navigator::Update(const_cast<TLBSWidget*>(RootWidget), PadState.Gamepad)) {
+        if (PadIsActive && !Overlay::EditMode && Navigator::Update(const_cast<TLBSWidget*>(RootWidget), pad)) {
             PreviousButtons = PadState.Gamepad.wButtons;
             return;
         }
