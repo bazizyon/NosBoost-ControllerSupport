@@ -7,6 +7,7 @@
 #include "Navigator.h"
 #include "Radial.h"
 #include "Clients.h"
+#include "imgui_internal.h"
 
 namespace ControllerSupport {
     bool WindowVisible = false;
@@ -20,6 +21,33 @@ namespace ControllerSupport {
         {TEWGraphicButtonWidget::ClassName, TEWGraphicButtonWidget::Version, TEWGraphicButtonWidget::ExpectedSize},
         {TEWCustomPanelWidget::ClassName, TEWCustomPanelWidget::Version, TEWCustomPanelWidget::ExpectedSize},
     };
+
+    // The gamepad drives ImGui only while one of its windows has the focus, clicking the game takes it back.
+    bool ModsMenuOpen = false;
+    bool ImGuiFocused = false;
+    bool ImGuiNavSet = false;
+    bool ImGuiViewWasDown = false;
+    bool DropImGuiFocus = false;
+
+    void UpdateImGuiFocus() {
+        const ImGuiWindow* mods = ImGui::FindWindowByName("Mods");
+        const bool open = mods && mods->WasActive;
+        if (open && !ModsMenuOpen) ImGui::SetWindowFocus("Mods");
+        ModsMenuOpen = open;
+        if (DropImGuiFocus) {
+            ImGui::SetWindowFocus(nullptr);
+            DropImGuiFocus = false;
+        }
+        ImGuiFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow);
+        ImGuiIO& io = ImGui::GetIO();
+        if (ImGuiFocused && !(io.ConfigFlags & ImGuiConfigFlags_NavEnableGamepad)) {
+            io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+            ImGuiNavSet = true;
+        } else if (!ImGuiFocused && ImGuiNavSet) {
+            io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
+            ImGuiNavSet = false;
+        }
+    }
 
     bool GameFocused() {
         DWORD process = 0;
@@ -247,7 +275,7 @@ extern "C" {
         const TSceneManager* scene = GetSceneManager();
         const bool inGame = tickContext.isPlayerLoaded && scene && scene->mapPlayerObjPtr;
         if (inGame) {
-            Overlay::Update(const_cast<TLBSWidget*>(RootWidget), PadIsActive && !Navigator::Window && !Radial::HidesBars(), PadState.Gamepad,
+            Overlay::Update(const_cast<TLBSWidget*>(RootWidget), PadIsActive && !Navigator::Window && !Radial::HidesBars() && !ImGuiFocused, PadState.Gamepad,
                             tickContext.mouseX, tickContext.mouseY);
         } else {
             Overlay::HideAll(const_cast<TLBSWidget*>(RootWidget));
@@ -258,6 +286,19 @@ extern "C" {
             Navigator::Close(false);
             return;
         }
+        // View closes the mods menu, or hands a focused mod window back to the game.
+        if (ImGuiFocused && PadIsActive) {
+            const bool viewDown = (PadState.Gamepad.wButtons & XINPUT_GAMEPAD_BACK) != 0;
+            if (viewDown && !ImGuiViewWasDown) {
+                if (ModsMenuOpen) PressKey(VK_F9);
+                DropImGuiFocus = true;
+            }
+            ImGuiViewWasDown = viewDown;
+            PreviousButtons = PadState.Gamepad.wButtons;
+            Navigator::Close(false);
+            return;
+        }
+        ImGuiViewWasDown = (PadState.Gamepad.wButtons & XINPUT_GAMEPAD_BACK) != 0;
         XINPUT_GAMEPAD pad = PadState.Gamepad;
         if (PadIsActive && !Overlay::EditMode && Radial::Update(const_cast<TLBSWidget*>(RootWidget), pad, inGame)) {
             PreviousButtons = PadState.Gamepad.wButtons;
@@ -339,6 +380,7 @@ extern "C" {
     }
 
     __declspec(dllexport) void ModTick(const TLBSWidget* RootWidget, const TickContext tickContext) {
+        UpdateImGuiFocus();
         if (WindowVisible) {
             ImGui::Begin("Gamepad Debug");
             ImGui::Text("RotateBy: %s", rotateByFunction ? "found" : "NOT FOUND");
