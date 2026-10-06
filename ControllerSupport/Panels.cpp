@@ -13,7 +13,7 @@ namespace ControllerSupport::Overlay {
     }
 
     bool IsBarSkill(const uint8_t action) {
-        return action >= PetSkill1 && action <= PartnerSkill3;
+        return action >= PetSkill1 && action <= Linker5;
     }
 
     void LoadImages() {
@@ -27,6 +27,8 @@ namespace ControllerSupport::Overlay {
         LayerGlyphs[LB][0] = Load("XBOX_LB");
         LayerGlyphs[LTRT][0] = LayerGlyphs[LT][0];
         LayerGlyphs[LTRT][1] = LayerGlyphs[RT][0];
+        LayerGlyphs[LTRB][0] = LayerGlyphs[LT][0];
+        LayerGlyphs[LTRB][1] = LayerGlyphs[RB][0];
     }
 
     void Attach(TLBSWidget* parent, TLBSWidget* child) {
@@ -108,6 +110,7 @@ namespace ControllerSupport::Overlay {
         if (slot.actionIcon && look.sprite) PlacePicture(slot.actionIcon, *look.sprite, -GlyphOffset, -GlyphOffset, look.caption[0]);
         slot.motion = 0;
         slot.barRecord = 0;
+        slot.recast = 0;
         if (!slot.icon || !binding.set || binding.action) return;
         static_cast<TLBSWidget*>(slot.icon)->isInteractable = true;
         auto* bytes = reinterpret_cast<uint8_t*>(slot.icon);

@@ -23,7 +23,7 @@ namespace ControllerSupport::Overlay {
             const uint8_t kind = DragFields[0xB4 - BindingFirst];
             for (int layer = 0; layer < LayerCount && (kind == SkillKind || kind == ItemKind); layer++) {
                 for (int i = 0; i < 8; i++) {
-                    if (!Contains(Panels[layer].slots[i].rect, mouseX, mouseY)) continue;
+                    if (Fixed(layer) || !Contains(Panels[layer].slots[i].rect, mouseX, mouseY)) continue;
                     Binding& binding = Bindings[layer][i];
                     binding = {};
                     binding.set = true;
@@ -40,7 +40,7 @@ namespace ControllerSupport::Overlay {
     }
 
     void HighlightSelection() {
-        for (int id = 1; id < ActionCount; id++) {
+        for (int id = 1; id < Linker1; id++) {
             if (!PaletteTiles[id]) continue;
             const bool selected = id == SelectedAction;
             PaletteTiles[id]->color = selected ? Color(255, 255, 220, 120) : Color(255, 255, 255, 255);
@@ -60,7 +60,7 @@ namespace ControllerSupport::Overlay {
     }
 
     void BuildPalette(TLBSWidget* root, const int16_t panelsRight) {
-        constexpr int Rows = ActionCount / 2;
+        constexpr int Rows = Linker1 / 2;
         const int16_t height = static_cast<int16_t>(Rows * Step + 30);
         const int16_t left = static_cast<int16_t>(panelsRight + 30);
         const int16_t top = static_cast<int16_t>(root->rect.bottom - root->rect.top - BottomMargin - Step - SlotSize / 2 - height + SlotSize + 2 * Step - EditRaise);
@@ -70,7 +70,7 @@ namespace ControllerSupport::Overlay {
         Attach(root, container);
         PaletteContainer = container;
         AddLabel(container, 0, 0, 2 * Step, 3, L"Actions");
-        for (int id = 1; id < ActionCount; id++) {
+        for (int id = 1; id < Linker1; id++) {
             const int16_t x = static_cast<int16_t>(((id - 1) % 2) * Step);
             const int16_t y = static_cast<int16_t>(24 + ((id - 1) / 2) * Step);
             PaletteRefs[id] = static_cast<uint8_t>(id);
@@ -166,6 +166,7 @@ namespace ControllerSupport::Overlay {
     }
 
     void PlaceAction(const int layer, const int cell, const uint8_t action) {
+        if (Fixed(layer)) return;
         Binding& binding = Bindings[layer][cell];
         binding = {};
         binding.set = true;
@@ -179,7 +180,7 @@ namespace ControllerSupport::Overlay {
     void WatchPaletteDrag(TLBSWidget* root, const int32_t mouseX, const int32_t mouseY) {
         const bool down = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
         if (down && !LeftWasDown) {
-            for (int id = 1; id < ActionCount; id++) {
+            for (int id = 1; id < Linker1; id++) {
                 if (PaletteTiles[id] && Contains(PaletteRects[id], mouseX, mouseY)) {
                     DraggedAction = static_cast<uint8_t>(id);
                     DragStartX = mouseX;
@@ -219,7 +220,7 @@ namespace ControllerSupport::Overlay {
         if (down && !RightWasDown) {
             for (int layer = 0; layer < LayerCount; layer++) {
                 for (int cell = 0; cell < 8; cell++) {
-                    if (!Contains(Panels[layer].slots[cell].rect, mouseX, mouseY)) continue;
+                    if (Fixed(layer) || !Contains(Panels[layer].slots[cell].rect, mouseX, mouseY)) continue;
                     Bindings[layer][cell] = {};
                     Panels[layer].slots[cell].source = nullptr;
                     Panels[layer].slots[cell].cooling = false;

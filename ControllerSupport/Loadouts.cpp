@@ -22,6 +22,7 @@ namespace ControllerSupport::Overlay {
         const std::string path = IniPath();
         const std::string section = Section();
         for (int layer = 0; layer < LayerCount; layer++) {
+            if (Fixed(layer)) continue;
             for (int cell = 0; cell < 8; cell++) {
                 const Binding& binding = Bindings[layer][cell];
                 const std::string key = "L" + std::to_string(layer) + "C" + std::to_string(cell);
@@ -83,7 +84,7 @@ namespace ControllerSupport::Overlay {
             for (int cell = 0; cell < 8; cell++) {
                 char value[32]{};
                 const std::string key = "L" + std::to_string(layer) + "C" + std::to_string(cell);
-                GetPrivateProfileStringA(section.c_str(), key.c_str(), "", value, sizeof(value), path.c_str());
+                if (!Fixed(layer)) GetPrivateProfileStringA(section.c_str(), key.c_str(), "", value, sizeof(value), path.c_str());
                 int kind = 0, tab = 0, index = 0;
                 if (!value[0] && DefaultActions[layer][cell]) {
                     Binding& binding = Bindings[layer][cell];
@@ -92,7 +93,7 @@ namespace ControllerSupport::Overlay {
                     ApplyBinding(Panels[layer].slots[cell], binding);
                     continue;
                 }
-                if (std::sscanf(value, "A,%d", &kind) == 1 && kind > NoAction && kind < ActionCount) {
+                if (std::sscanf(value, "A,%d", &kind) == 1 && kind > NoAction && kind < Linker1) {
                     Binding& binding = Bindings[layer][cell];
                     binding.set = true;
                     binding.action = static_cast<uint8_t>(kind);

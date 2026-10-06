@@ -20,7 +20,7 @@ namespace ControllerSupport {
 
     bool KeyboardOrMouseUsed();
 
-    constexpr const char* HiddenBarClasses[] = {"TNTQuickSlotWidget", "TNTPartnerSlotWidget", "TNTPetSKillSlotWidget"};
+    constexpr const char* HiddenBarClasses[] = {"TNTQuickSlotWidget", "TNTPartnerSlotWidget", "TNTPetSKillSlotWidget", "TNTLinkerSlotWidget"};
     constexpr int16_t OffScreen = -20000;
 
     struct MovedBar {

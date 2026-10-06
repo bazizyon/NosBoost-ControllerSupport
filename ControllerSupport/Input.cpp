@@ -51,10 +51,16 @@ namespace ControllerSupport {
         });
         for (const char* name : HiddenBarClasses) {
             TLBSWidget* bar = FindWidgetOfClass(root, name, 2);
-            if (!bar || std::ranges::any_of(MovedBars, [bar](const MovedBar& moved) { return moved.widget == bar; })) {
-                continue;
+            if (!bar) continue;
+            const auto moved = std::ranges::find_if(MovedBars, [bar](const MovedBar& entry) { return entry.widget == bar; });
+            if (moved != MovedBars.end() && bar->rect.left == OffScreen) continue;
+            // A map change puts the game's bars back.
+            if (moved != MovedBars.end()) {
+                moved->x = bar->rect.left;
+                moved->y = bar->rect.top;
+            } else {
+                MovedBars.push_back({bar, bar->rect.left, bar->rect.top});
             }
-            MovedBars.push_back({bar, bar->rect.left, bar->rect.top});
             const int16_t width = bar->rect.right - bar->rect.left;
             const int16_t height = bar->rect.bottom - bar->rect.top;
             bar->rect = {OffScreen, OffScreen, static_cast<int16_t>(OffScreen + width), static_cast<int16_t>(OffScreen + height)};

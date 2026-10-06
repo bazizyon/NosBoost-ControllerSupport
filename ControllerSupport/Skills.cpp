@@ -237,13 +237,15 @@ namespace ControllerSupport::Overlay {
 
     TNTTimeAniIcon* BarIcon(const TLBSWidget* root, const uint8_t action) {
         const bool pet = action <= PetSkill3;
-        const TLBSWidget* bar = FindWidgetOfClass(root, pet ? "TNTPetSKillSlotWidget" : "TNTPartnerSlotWidget", 1);
-        // The game hides this bar while the pet or partner is away, its icons keep old skills.
+        const bool linker = action >= Linker1;
+        const TLBSWidget* bar = FindWidgetOfClass(root, linker ? "TNTLinkerSlotWidget" : pet ? "TNTPetSKillSlotWidget" : "TNTPartnerSlotWidget", 1);
+        // The game hides these bars while there's nothing to use, their icons keep old skills.
         if (!bar || !bar->isVisible || !bar->childrenList || !bar->childrenList->list) return nullptr;
-        int wanted = action - (pet ? PetSkill1 : PartnerSkill1);
+        int wanted = action - (linker ? Linker1 : pet ? PetSkill1 : PartnerSkill1);
         for (uint32_t i = 0; i < bar->childrenList->count; i++) {
             TLBSWidget* child = bar->childrenList->list[i];
-            if (IsClass(child, "TNTTimeAniIcon") && wanted-- == 0) return reinterpret_cast<TNTTimeAniIcon*>(child);
+            if (!IsClass(child, "TNTTimeAniIcon") || wanted-- != 0) continue;
+            return !linker || child->isVisible ? reinterpret_cast<TNTTimeAniIcon*>(child) : nullptr;
         }
         return nullptr;
     }
@@ -302,10 +304,86 @@ namespace ControllerSupport::Overlay {
     }
 
     // Handlers come from the skill window or inventory, never from the game's hotbar.
+    // While a recast stage is up it shares the base skill's hotbar slot record (+0x14), only when the base is on the game's bar.
+    const uint8_t* ActiveStage(const TLBSWidget* root, const uint8_t* base) {
+        const uintptr_t baseEntry = *reinterpret_cast<const uintptr_t*>(base);
+        const uintptr_t link = baseEntry ? *reinterpret_cast<const uintptr_t*>(baseEntry + 0x14) : 0;
+        if (!link) return base;
+        const TLBSWidget* window = SkillWindow(root);
+        const auto* bytes = reinterpret_cast<const uint8_t*>(window);
+        for (uint32_t offset = 0x15C; window && offset <= 0x168; offset += 4) {
+            const auto* list = *reinterpret_cast<const uint8_t* const*>(bytes + offset);
+            if (!IsClass(reinterpret_cast<const TLBSWidget*>(list), "TNTItemList")) continue;
+            const auto* items = *reinterpret_cast<const uint8_t* const* const*>(list + 4);
+            const int32_t count = *reinterpret_cast<const int32_t*>(list + 8);
+            for (int32_t i = 0; items && i < count; i++) {
+                const uint8_t* item = items[i];
+                const uintptr_t entry = item ? *reinterpret_cast<const uintptr_t*>(item) : 0;
+                if (!entry || entry == baseEntry || *reinterpret_cast<const int16_t*>(item + 6) != 1) continue;
+                if (*reinterpret_cast<const uint8_t*>(entry + 0x11) && *reinterpret_cast<const uintptr_t*>(entry + 0x14) == link) return item;
+            }
+        }
+        return base;
+    }
+
+    bool IsRecastStage(const uintptr_t entry) {
+        const uintptr_t data = entry ? *reinterpret_cast<const uintptr_t*>(entry + 0x08) : 0;
+        return data && *reinterpret_cast<const int32_t*>(data + 0x68) == 999;
+    }
+
+    const uint8_t* LinkedRecast(const TLBSWidget* root, SlotView& slot) {
+        if (!slot.recast) return nullptr;
+        for (uint8_t action = Linker1; action <= Linker5; action++) {
+            const TNTTimeAniIcon* icon = BarIcon(root, action);
+            if (icon && reinterpret_cast<uintptr_t>(icon->image) == slot.recast) return reinterpret_cast<const uint8_t*>(icon);
+        }
+        slot.recast = 0;
+        return nullptr;
+    }
+
+    // Skills that turn into a follow-up carry a type 68 effect, Meditate doesn't.
+    bool HasFollowUp(const uintptr_t entry) {
+        const uintptr_t data = entry ? *reinterpret_cast<const uintptr_t*>(entry + 0x08) : 0;
+        for (int i = 0; data && i < 5; i++) {
+            if (*reinterpret_cast<const int32_t*>(data + 0x1D8 + i * 0x14) == 68) return true;
+        }
+        return false;
+    }
+
+    // A recast stage showing up right after a slot was cast takes over that slot.
+    void LinkRecasts(const TLBSWidget* root) {
+        if (LastCastLayer < 0 || GetTickCount() - LastCastTick > 1500) return;
+        SlotView& slot = Panels[LastCastLayer].slots[LastCastCell];
+        if (!slot.icon || !HasFollowUp(reinterpret_cast<uintptr_t>(slot.icon->image))) return;
+        for (uint8_t action = Linker1; action <= Linker5; action++) {
+            const TNTTimeAniIcon* icon = BarIcon(root, action);
+            const uintptr_t record = icon ? reinterpret_cast<uintptr_t>(icon->image) : 0;
+            if (!record || record == slot.recast || !IsRecastStage(record)) continue;
+            bool taken = false;
+            for (const Panel& panel : Panels) {
+                for (const SlotView& other : panel.slots) taken = taken || other.recast == record;
+            }
+            if (taken) continue;
+            slot.recast = record;
+            LastCastLayer = -1;
+            return;
+        }
+    }
+
+    const uint8_t* HotbarIcon(const TLBSWidget* root) {
+        const TLBSWidget* bar = FindWidgetOfClass(root, "TNTQuickSlotWidget", 1);
+        return bar ? *reinterpret_cast<const uint8_t* const*>(reinterpret_cast<const uint8_t*>(bar) + 0xCC) : nullptr;
+    }
+
     bool ResolveSkill(const TLBSWidget* root, Binding& binding, SlotView& slot) {
         const bool isItem = binding.kind == ItemKind;
-        const uint8_t* item = isItem ? InventoryItem(root, binding.tab, binding.index) : SkillItem(root, binding.tab, binding.index);
-        const auto* model = isItem ? InventoryIcon(root) : reinterpret_cast<const uint8_t*>(SkillWindowIcon(root, 0));
+        const uint8_t* base = isItem ? InventoryItem(root, binding.tab, binding.index) : SkillItem(root, binding.tab, binding.index);
+        const uint8_t* item = base && !isItem && binding.tab == 1 ? ActiveStage(root, base) : base;
+        const uint8_t* linked = base && !isItem ? LinkedRecast(root, slot) : nullptr;
+        if (linked) item = linked + 0xB0;
+        // The skill window refuses recast stages while in an SP, the game's hotbar casts them.
+        const auto* model = isItem ? InventoryIcon(root)
+            : linked ? linked : item != base ? HotbarIcon(root) : reinterpret_cast<const uint8_t*>(SkillWindowIcon(root, 0));
         if (!item || !model) {
             slot.missing = true;
             return false;

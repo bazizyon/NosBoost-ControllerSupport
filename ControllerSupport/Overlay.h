@@ -56,7 +56,7 @@ namespace ControllerSupport::Overlay {
     enum Action : uint8_t {
         NoAction, Attack, ClearTarget, NextTarget, PrevTarget, BossTarget, PickUp, Sit, Specialist,
         PartnerSpecialist, PetsFollow, PetsStop, Chat, PetSkill1, PetSkill2, PetSkill3, PartnerSkill1, PartnerSkill2,
-        PartnerSkill3, ActionCount
+        PartnerSkill3, Linker1, Linker2, Linker3, Linker4, Linker5, ActionCount
     };
     struct ActionLook {
         const wchar_t* text;
@@ -84,6 +84,11 @@ namespace ControllerSupport::Overlay {
         {L"Partner 1", nullptr, 0, L""},
         {L"Partner 2", nullptr, 0, L""},
         {L"Partner 3", nullptr, 0, L""},
+        {L"Linker 1", nullptr, 0, L""},
+        {L"Linker 2", nullptr, 0, L""},
+        {L"Linker 3", nullptr, 0, L""},
+        {L"Linker 4", nullptr, 0, L""},
+        {L"Linker 5", nullptr, 0, L""},
     };
 
     bool IsBarSkill(const uint8_t action);
@@ -97,6 +102,7 @@ namespace ControllerSupport::Overlay {
         TNTTimeAniIcon* source = nullptr;
         int16_t motion = 0;
         uintptr_t barRecord = 0;
+        uintptr_t recast = 0;
         uint32_t cooldownStart = 0;
         bool missing = false;
         bool cooling = false;
@@ -120,7 +126,12 @@ namespace ControllerSupport::Overlay {
     };
     constexpr uint8_t ItemKind = 2;
     constexpr uint8_t SkillKind = 3;
-    enum Layer { Base, RB, LT, RT, LB, LTRT, LayerCount };
+    enum Layer { Base, RB, LT, RT, LB, LTRT, LTRB, LayerCount };
+
+    // LT+RB always holds the game's linker popup, it isn't saved or editable.
+    constexpr bool Fixed(const int layer) {
+        return layer == LTRB;
+    }
     inline Binding Bindings[LayerCount][8];
 
     inline bool EditMode = false;
@@ -204,6 +215,8 @@ namespace ControllerSupport::Overlay {
     constexpr uint8_t DefaultActions[LayerCount][8] = {
         {NoAction, NoAction, PrevTarget, NextTarget, BossTarget, Attack, NoAction, ClearTarget},
         {PetsFollow, PetsStop, Chat, NoAction, PartnerSpecialist, PickUp, Specialist, Sit},
+        {}, {}, {}, {},
+        {Linker5, NoAction, NoAction, NoAction, Linker3, Linker1, Linker2, Linker4},
     };
 
     void ApplyDefaults();
@@ -228,6 +241,10 @@ namespace ControllerSupport::Overlay {
         bool active = false;
     };
     inline PendingCast Casting;
+    inline int LastCastLayer = -1;
+    inline int LastCastCell = -1;
+    inline DWORD LastCastTick = 0;
+    void LinkRecasts(const TLBSWidget* root);
 
     bool Cast(const int layer, const int cell);
     void StepCast();
@@ -266,11 +283,13 @@ namespace ControllerSupport::Overlay {
 
     constexpr int16_t EditColumn = (CrossGap + 2 * Step + SlotSize + 40) / 2;
     constexpr int16_t EditRow = 2 * Step + SlotSize + 40;
-    constexpr int16_t EditShift[LayerCount] = {-EditColumn, EditColumn, -EditColumn, EditColumn, -EditColumn, EditColumn};
+    constexpr int16_t EditShift[LayerCount] = {-EditColumn, EditColumn, -EditColumn, EditColumn, -EditColumn, EditColumn, -EditColumn};
     constexpr int16_t EditLift[LayerCount] = {EditRaise, EditRaise, EditRaise + EditRow, EditRaise + EditRow,
-                                              EditRaise + 2 * EditRow, EditRaise + 2 * EditRow};
+                                              EditRaise + 2 * EditRow, EditRaise + 2 * EditRow, EditRaise + 3 * EditRow};
 
     TNTTimeAniIcon* BarIcon(const TLBSWidget* root, const uint8_t action);
+    void UpdateHint(TLBSWidget* root, bool shown);
+    void DestroyHint();
     uintptr_t CopyBarSkill(TNTTimeAniIcon* icon, const TNTTimeAniIcon* source, const bool interactable);
     int16_t ItemId(uintptr_t record);
     TLBSWidget* InventoryWindow(const TLBSWidget* root);

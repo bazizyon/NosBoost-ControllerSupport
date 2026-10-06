@@ -10,6 +10,7 @@ namespace ControllerSupport::Overlay {
         const bool lt = pad.bLeftTrigger > XINPUT_GAMEPAD_TRIGGER_THRESHOLD;
         const bool rt = pad.bRightTrigger > XINPUT_GAMEPAD_TRIGGER_THRESHOLD;
         if (lt && rt) return LTRT;
+        if (lt && (pad.wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER)) return LTRB;
         if (lt) return LT;
         if (rt) return RT;
         if (pad.wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER) return LB;
@@ -20,6 +21,7 @@ namespace ControllerSupport::Overlay {
     void Update(TLBSWidget* root, const bool padActive, const XINPUT_GAMEPAD& pad, const int32_t mouseX, const int32_t mouseY) {
         if (!root || !root->childrenList) return;
         if (root != AttachedRoot || EditMode != AppliedEditMode) {
+            DestroyHint();
             LoadImages();
             DestroyPalette();
             if (root == AttachedRoot) {
@@ -43,10 +45,12 @@ namespace ControllerSupport::Overlay {
         TrackCharacter(root);
         UpdateLoad(root);
         StepCast();
+        LinkRecasts(root);
         ResolveSkills(root);
         ShowMotions(root);
         ShowBarSkills(root);
         SyncCooldowns(root);
+        UpdateHint(root, padActive && !EditMode);
         if (EditMode) {
             WatchDrag(root, mouseX, mouseY);
             WatchPaletteDrag(root, mouseX, mouseY);

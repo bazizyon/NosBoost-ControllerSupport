@@ -122,6 +122,7 @@ extern "C" {
         }
         Overlay::AttachedRoot = nullptr;
         Navigator::Destroy();
+        Overlay::DestroyHint();
     }
 
     __declspec(dllexport) void ModEarlyTick(const TLBSWidget* RootWidget, const TickContext tickContext) {

@@ -38,4 +38,5 @@ namespace ControllerSupport::Navigator {
     bool Update(TLBSWidget* root, const XINPUT_GAMEPAD& pad);
     void Close(bool restoreCursor = true);
     void Destroy();
+    TEWCustomPanelWidget* AddBoard(TLBSWidget* parent, int16_t width, int16_t height);
 }
