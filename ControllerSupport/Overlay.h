@@ -301,4 +301,5 @@ namespace ControllerSupport::Overlay {
     void ShowMotions(const TLBSWidget* root);
     int ActiveLayer(const XINPUT_GAMEPAD& pad);
     void Update(TLBSWidget* root, const bool padActive, const XINPUT_GAMEPAD& pad, const int32_t mouseX, const int32_t mouseY);
+    void HideAll(TLBSWidget* root);
 }

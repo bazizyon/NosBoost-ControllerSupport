@@ -62,4 +62,14 @@ namespace ControllerSupport::Overlay {
         if (Casting.active) shown = Casting.layer;
         for (int layer = 0; layer < LayerCount; layer++) Show(Panels[layer], layer == shown, Bindings[layer]);
     }
+
+    void HideAll(TLBSWidget* root) {
+        if (!AttachedRoot) return;
+        UpdateHint(root, false);
+        for (Panel& panel : Panels) {
+            if (!panel.shown || !panel.container) continue;
+            panel.shown = false;
+            panel.container->isVisible = false;
+        }
+    }
 }

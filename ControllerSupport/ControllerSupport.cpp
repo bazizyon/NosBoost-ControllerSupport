@@ -217,9 +217,13 @@ extern "C" {
             PadResult = ERROR_DEVICE_NOT_CONNECTED;
         }
         UpdateInputMode(RootWidget);
-        if (tickContext.isPlayerLoaded) {
+        const TSceneManager* scene = GetSceneManager();
+        const bool inGame = tickContext.isPlayerLoaded && scene && scene->mapPlayerObjPtr;
+        if (inGame) {
             Overlay::Update(const_cast<TLBSWidget*>(RootWidget), PadIsActive && !Navigator::Window, PadState.Gamepad,
                             tickContext.mouseX, tickContext.mouseY);
+        } else {
+            Overlay::HideAll(const_cast<TLBSWidget*>(RootWidget));
         }
         if (PadResult != ERROR_SUCCESS) {
             Navigator::Close(false);
@@ -227,7 +231,7 @@ extern "C" {
         }
         // Login, server and character selection have nothing but UI, so UI mode is always on there.
         static bool wasInGame = false;
-        if (!tickContext.isPlayerLoaded) {
+        if (!inGame) {
             wasInGame = false;
             if (PadIsActive) Navigator::Update(const_cast<TLBSWidget*>(RootWidget), PadState.Gamepad, true);
             else Navigator::Close(false);
