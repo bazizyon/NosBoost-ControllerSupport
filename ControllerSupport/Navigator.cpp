@@ -34,10 +34,10 @@ namespace ControllerSupport::Navigator {
     }
 
     // Lists draw their own rows: +0x72 rows shown, +0x86 row height, +0x98 the entries, +0xA0 the first one shown.
-    // +0x76 is 0 on lists that only show text, like the bazaar's.
+    // +0x76 is 0 on text-only lists. TEWListView rows (+0xC8 selected) are clicked through their window.
     void CollectRows(TLBSWidget* list, const Rect& rect, std::vector<Target>& out) {
         const auto* bytes = reinterpret_cast<const uint8_t*>(list);
-        if (!bytes[0x76]) return;
+        if (!bytes[0x76] && !IsA(list, "TEWListView")) return;
         const uint16_t shown = *reinterpret_cast<const uint16_t*>(bytes + 0x72);
         const uint16_t height = *reinterpret_cast<const uint16_t*>(bytes + 0x86);
         const auto* entries = *reinterpret_cast<const uint8_t* const*>(bytes + 0x98);
@@ -63,6 +63,34 @@ namespace ControllerSupport::Navigator {
             if (IsA(child, "TEWStringListView")) CollectRows(child, rect, out);
             Collect(child, rect.left, rect.top, out);
         }
+    }
+
+    int32_t Entries(const TLBSWidget* list) {
+        const auto* entries = *reinterpret_cast<const uint8_t* const*>(reinterpret_cast<const uint8_t*>(list) + 0x98);
+        return entries ? *reinterpret_cast<const int32_t*>(entries + 0x14) : -1;
+    }
+
+    void MergeColumns(std::vector<Target>& targets) {
+        std::vector<bool> drop(targets.size());
+        for (size_t i = 0; i < targets.size(); i++) {
+            Target& row = targets[i];
+            if (row.row < 0 || drop[i]) continue;
+            for (size_t j = i + 1; j < targets.size(); j++) {
+                const Target& other = targets[j];
+                if (other.row < 0 || drop[j] || other.widget->parent != row.widget->parent || other.rect.top != row.rect.top
+                    || other.rect.bottom != row.rect.bottom || Entries(other.widget) != Entries(row.widget)) {
+                    continue;
+                }
+                row.rect.left = std::min(row.rect.left, other.rect.left);
+                row.rect.right = std::max(row.rect.right, other.rect.right);
+                drop[j] = true;
+            }
+        }
+        size_t kept = 0;
+        for (size_t i = 0; i < targets.size(); i++) {
+            if (!drop[i]) targets[kept++] = targets[i];
+        }
+        targets.resize(kept);
     }
 
     // A label or marker inside a button is a target of its own, keep only the button around it.
@@ -389,6 +417,12 @@ namespace ControllerSupport::Navigator {
             && Window->rect.right > Legend->rect.left && Window->rect.top - height - 8 >= 0) {
             top = static_cast<int16_t>(Window->rect.top - height - 8);
         }
+        const auto width = static_cast<int16_t>(Legend->rect.right - Legend->rect.left);
+        const auto left = static_cast<int16_t>((root->rect.right - root->rect.left - width) / 2);
+        if (Legend->rect.left != left) {
+            Legend->rect.left = left;
+            Legend->rect.right = static_cast<int16_t>(left + width);
+        }
         if (Legend->rect.top != top) {
             Legend->rect.top = top;
             Legend->rect.bottom = static_cast<int16_t>(top + height);
@@ -433,6 +467,7 @@ namespace ControllerSupport::Navigator {
         ShowLegend(root, true, always);
         Targets.clear();
         CollectWindow(window, Targets);
+        MergeColumns(Targets);
         DropNested(Targets);
         if (window != Window) {
             Window = window;
