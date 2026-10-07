@@ -10,26 +10,33 @@ namespace ControllerSupport::Radial {
     constexpr DWORD HoldTime = 300;
     constexpr float IconScale = 1.6f;
 
-    enum Where { TaskBar, TaskBarText, RootButton, MiniMap };
+    enum Where { TaskBar, TaskBarText, RootButton, MiniMap, Key, Motion };
 
     struct Entry {
         const wchar_t* name;
+        const wchar_t* label;
         Where where;
         AtlasFrame frame;
         AtlasFrame hover;
+        int value;
     };
 
     constexpr Entry Entries[] = {
-        {L"Inventory", TaskBar, {60, 0, 30, 30}, {60, 30, 30, 30}},
-        {L"Skills", TaskBar, {30, 0, 30, 30}, {30, 30, 30, 30}},
-        {L"Character", TaskBar, {0, 0, 30, 30}, {0, 30, 30, 30}},
-        {L"Quests", TaskBar, {120, 0, 30, 30}, {120, 30, 30, 30}},
-        {L"Map", MiniMap, {404, 93, 31, 18}, {436, 93, 31, 18}},
-        {L"Friends", TaskBar, {180, 0, 30, 30}, {180, 30, 30, 30}},
-        {L"Family", TaskBar, {150, 0, 30, 30}, {150, 30, 30, 30}},
-        {L"NosMall", RootButton, {90, 0, 30, 30}, {90, 30, 30, 30}},
-        {L"Settings", TaskBarText, {0, 0, 0, 0}, {}},
-        {L"Server selection", TaskBarText, {1, 0, 0, 0}, {}},
+        {L"Inventory", L"", TaskBar, {60, 0, 30, 30}, {60, 30, 30, 30}, 0},
+        {L"Skills", L"", TaskBar, {30, 0, 30, 30}, {30, 30, 30, 30}, 0},
+        {L"Character", L"", TaskBar, {0, 0, 30, 30}, {0, 30, 30, 30}, 0},
+        {L"Quests", L"", TaskBar, {120, 0, 30, 30}, {120, 30, 30, 30}, 0},
+        {L"Map", L"", MiniMap, {404, 93, 31, 18}, {436, 93, 31, 18}, 0},
+        {L"Friends", L"", TaskBar, {180, 0, 30, 30}, {180, 30, 30, 30}, 0},
+        {L"Family", L"Family", Key, {}, {}, 'J'},
+        {L"Settings", L"Settings", TaskBarText, {}, {}, 0},
+        {L"NosMall", L"", RootButton, {90, 0, 30, 30}, {90, 30, 30, 30}, 0},
+        {L"NosBazaar", L"", Motion, {}, {}, 12},
+        {L"Raid List", L"", Motion, {}, {}, 11},
+        {L"Time Circle", L"", Motion, {}, {}, 10},
+        {L"Celestial Spire Catacombs", L"", Motion, {}, {}, 13},
+        {L"Mini-land", L"", TaskBar, {150, 0, 30, 30}, {150, 30, 30, 30}, 0},
+        {L"Server selection", L"Server", TaskBarText, {}, {}, 1},
     };
     constexpr int Count = static_cast<int>(std::size(Entries));
     constexpr int ServerSelection = Count - 1;
@@ -41,6 +48,7 @@ namespace ControllerSupport::Radial {
         AtlasFrame frame{};
         AtlasFrame hover{};
         bool marked = false;
+        int16_t motion = 0;
     };
 
     // One ring of choices, opened by holding its button.
@@ -51,10 +59,17 @@ namespace ControllerSupport::Radial {
         std::vector<Item> items;
         std::vector<TEWCustomPanelWidget*> icons;
         std::vector<TEWCustomPanelWidget*> boards;
+        std::vector<TNTTimeAniIcon*> motions;
         TEWCustomPanelWidget* nameBoard = nullptr;
         TEWCustomPanelWidget* highlight = nullptr;
         TEWLabel* name = nullptr;
         int16_t size = 0;
+        int page = 0;
+        int first = 0;
+        int count = 0;
+        WORD previous = 0;
+        int16_t builtWidth = 0;
+        int16_t builtHeight = 0;
         bool held = false;
         DWORD downTick = 0;
         int choice = -1;
@@ -62,7 +77,6 @@ namespace ControllerSupport::Radial {
         DWORD lastTilt = 0;
     };
 
-    Overlay::Image FrameImage;
     Ring GameRing{XINPUT_GAMEPAD_BACK};
     Ring ClientRing{XINPUT_GAMEPAD_START};
     std::vector<Clients::Client> ClientList;
@@ -71,6 +85,14 @@ namespace ControllerSupport::Radial {
     bool SettleLeft = false;
     bool SettleRight = false;
     DWORD SettleUntil = 0;
+
+    struct MotionClick {
+        bool active = false;
+        int step = 0;
+        LPARAM at = 0;
+        LPARAM back = 0;
+    };
+    MotionClick Using;
 
     bool CloseTaskBar = false;
     int CloseTicks = 0;
@@ -132,6 +154,11 @@ namespace ControllerSupport::Radial {
     // are opened and answered without being seen.
     void Open(TLBSWidget* root, const int index) {
         const Entry& entry = Entries[index];
+        if (entry.where == Key) {
+            PressKey(static_cast<UINT>(entry.value));
+            return;
+        }
+        if (entry.where == Motion) return;
         if (entry.where == RootButton || entry.where == MiniMap) {
             TLBSWidget* parent = entry.where == MiniMap ? FindWidgetOfClass(root, "TNTMiniMapWidget", 1) : nullptr;
             Click(parent, FindButton(parent ? parent : root, entry.frame));
@@ -139,7 +166,7 @@ namespace ControllerSupport::Radial {
         }
         TLBSWidget* taskBar = FindWidgetOfClass(root, "TNTTaskBarWidget", 1);
         if (!taskBar) return;
-        TLBSWidget* button = entry.where == TaskBarText ? TextButton(taskBar, entry.frame.topLeftX) : FindButton(taskBar, entry.frame);
+        TLBSWidget* button = entry.where == TaskBarText ? TextButton(taskBar, entry.value) : FindButton(taskBar, entry.frame);
         if (!button) return;
         TLBSWidget* box = FindWidgetOfClass(root, "TNTMessageBoxWidget", 1);
         if (index == ServerSelection && (!box || box->isVisible)) return;
@@ -217,23 +244,33 @@ namespace ControllerSupport::Radial {
         ring.highlight = nullptr;
         ring.icons.clear();
         ring.boards.clear();
+        ring.motions.clear();
     }
 
     Color BoardColor(const Ring& ring, const int index) {
         if (index == ring.choice) return Color(255, 255, 200, 60);
-        if (ring.items[index].marked) return Color(90, 255, 255, 255);
+        if (index < ring.count && ring.items[ring.first + index].marked) return Color(90, 255, 255, 255);
         return Color(215, 255, 255, 255);
     }
 
-    TEWCustomPanelWidget* AddHighlight(TLBSWidget* parent);
+    constexpr int PageSize = 8;
 
-    void Build(Ring& ring, TLBSWidget* root, std::vector<Item> items) {
+    int Pages(const Ring& ring) {
+        return std::max(1, (static_cast<int>(ring.items.size()) + PageSize - 1) / PageSize);
+    }
+
+    void BuildPage(Ring& ring, TLBSWidget* root) {
         Destroy(ring);
         Overlay::LoadImages();
-        ring.items = std::move(items);
-        const int count = static_cast<int>(ring.items.size());
+        const int pages = Pages(ring);
+        ring.page = std::clamp(ring.page, 0, pages - 1);
+        ring.first = ring.page * PageSize;
+        ring.count = std::min(PageSize, static_cast<int>(ring.items.size()) - ring.first);
+        const int count = ring.count;
+        const int spacing = pages > 1 ? PageSize : count;
         constexpr int16_t Radius = 170, Slot = 64;
-        ring.size = static_cast<int16_t>(2 * Radius + Slot + 32);
+        constexpr int16_t PageHeight = 30;
+        ring.size = static_cast<int16_t>(2 * Radius + Slot + 32 + 2 * (PageHeight + 10));
         auto* menu = Widget::Create<TLBSWidget>(CachedHost);
         if (!menu) return;
         const auto left = static_cast<int16_t>((root->rect.right - root->rect.left - ring.size) / 2);
@@ -241,19 +278,21 @@ namespace ControllerSupport::Radial {
         menu->rect = {left, top, static_cast<int16_t>(left + ring.size), static_cast<int16_t>(top + ring.size)};
         menu->isVisible = false;
         Overlay::Attach(root, menu);
-        ring.icons.assign(count, nullptr);
-        ring.boards.assign(count, nullptr);
-        for (int i = 0; i < count; i++) {
-            const Item& item = ring.items[i];
-            const bool text = !item.frame.width;
+        ring.icons.assign(spacing, nullptr);
+        ring.boards.assign(spacing, nullptr);
+        ring.motions.assign(spacing, nullptr);
+        for (int i = 0; i < spacing; i++) {
             constexpr int16_t width = Slot, height = Slot;
-            const float angle = 6.2831853f * static_cast<float>(i) / count;
+            const float angle = 6.2831853f * static_cast<float>(i) / spacing;
             const auto x = static_cast<int16_t>(ring.size / 2 + std::sin(angle) * Radius - width / 2);
             const auto y = static_cast<int16_t>(ring.size / 2 - std::cos(angle) * Radius - height / 2);
             if (TEWCustomPanelWidget* board = Navigator::AddBoard(menu, width, height)) {
                 board->rect = {x, y, static_cast<int16_t>(x + width), static_cast<int16_t>(y + height)};
                 ring.boards[i] = board;
             }
+            if (i >= count) continue;
+            const Item& item = ring.items[ring.first + i];
+            const bool text = !item.frame.width && !item.motion;
             if (text) {
                 if (TEWLabel* label = Overlay::AddLabel(menu, static_cast<int16_t>(x - 16), static_cast<int16_t>(y + height / 2 - 8),
                                                         static_cast<int16_t>(width + 32), 3, item.label.c_str())) {
@@ -261,12 +300,24 @@ namespace ControllerSupport::Radial {
                 }
                 continue;
             }
+            if (item.motion) {
+                auto* icon = Widget::Create<TNTTimeAniIcon>(CachedHost);
+                if (!icon) continue;
+                Overlay::InitCooldownFields(icon, root);
+                constexpr int16_t Inset = 8;
+                icon->rect = {static_cast<int16_t>(x + Inset), static_cast<int16_t>(y + Inset),
+                              static_cast<int16_t>(x + Slot - Inset), static_cast<int16_t>(y + Slot - Inset)};
+                Overlay::Attach(menu, icon);
+                if (Overlay::ShowMotion(icon, root, item.motion)) static_cast<TLBSWidget*>(icon)->isInteractable = true;
+                ring.motions[i] = icon;
+                continue;
+            }
             const auto iconWidth = static_cast<int16_t>(item.frame.width * IconScale);
             const auto iconHeight = static_cast<int16_t>(item.frame.height * IconScale);
             ring.icons[i] = AddScaled(menu, item.frame, static_cast<int16_t>(x + (Slot - iconWidth) / 2),
                                       static_cast<int16_t>(y + (Slot - iconHeight) / 2), iconWidth, iconHeight);
         }
-        for (int i = 0; i < count; i++) {
+        for (int i = 0; i < spacing; i++) {
             if (ring.boards[i]) ring.boards[i]->color = BoardColor(ring, i);
         }
         constexpr int16_t NameWidth = 160, NameHeight = 34;
@@ -279,38 +330,34 @@ namespace ControllerSupport::Radial {
         ring.name = Overlay::AddLabel(menu, static_cast<int16_t>(ring.size / 2 - NameWidth / 2), static_cast<int16_t>(ring.size / 2 - 8),
                                       NameWidth, 3, L"");
         if (ring.name) ring.name->isInteractable = false;
-        ring.highlight = AddHighlight(menu);
+        if (pages > 1) {
+            constexpr int16_t PageWidth = 70;
+            const auto pageLeft = static_cast<int16_t>(ring.size / 2 - PageWidth / 2);
+            const auto pageTop = static_cast<int16_t>(ring.size / 2 + Radius + Slot / 2 + 10);
+            if (TEWCustomPanelWidget* board = Navigator::AddBoard(menu, PageWidth, PageHeight)) {
+                board->rect = {pageLeft, pageTop, static_cast<int16_t>(pageLeft + PageWidth), static_cast<int16_t>(pageTop + PageHeight)};
+            }
+            const std::wstring text = std::to_wstring(ring.page + 1) + L" / " + std::to_wstring(pages);
+            if (TEWLabel* label = Overlay::AddLabel(menu, pageLeft, static_cast<int16_t>(pageTop + PageHeight / 2 - 8), PageWidth, 3,
+                                                    text.c_str())) {
+                label->isInteractable = false;
+            }
+            static const Overlay::Image Lb = Overlay::Load("XBOX_LB_SMALL"), Rb = Overlay::Load("XBOX_RB_SMALL");
+            const auto glyphTop = static_cast<int16_t>(pageTop + (PageHeight - Lb.height) / 2);
+            Overlay::AddImage(menu, Lb, static_cast<int16_t>(pageLeft - Lb.width - 4), glyphTop);
+            Overlay::AddImage(menu, Rb, static_cast<int16_t>(pageLeft + PageWidth + 4), glyphTop);
+        }
+        ring.highlight = Overlay::AddFrame(menu);
         ring.menu = menu;
         ring.root = root;
+        ring.builtWidth = static_cast<int16_t>(root->rect.right - root->rect.left);
+        ring.builtHeight = static_cast<int16_t>(root->rect.bottom - root->rect.top);
         ring.shown = -2;
     }
 
-    // The same yellow frame UI mode puts around its target.
-    TEWCustomPanelWidget* AddHighlight(TLBSWidget* parent) {
-        if (!FrameImage.id) FrameImage = Overlay::Load("FRAME");
-        if (!FrameImage.id) return nullptr;
-        auto* frame = Widget::Create<TEWCustomPanelWidget>(CachedHost);
-        if (!frame) return nullptr;
-        constexpr int16_t C = 8;
-        const auto S = static_cast<int16_t>(FrameImage.width);
-        const auto M = static_cast<int16_t>(S - 2 * C);
-        delete[] frame->imageData.atlasFrames;
-        frame->imageData.imageName = FrameImage.id;
-        frame->imageData.imageWidth = S;
-        frame->imageData.imageHeight = static_cast<int16_t>(FrameImage.height);
-        frame->imageData.frameCount = 9;
-        frame->imageData.atlasFrames = new AtlasFrame[9]{
-            {C, C, M, M}, {0, 0, C, C}, {C, 0, M, C}, {static_cast<int16_t>(S - C), 0, C, C},
-            {static_cast<int16_t>(S - C), C, C, M}, {static_cast<int16_t>(S - C), static_cast<int16_t>(S - C), C, C},
-            {C, static_cast<int16_t>(S - C), M, C}, {0, static_cast<int16_t>(S - C), C, C}, {0, C, C, M},
-        };
-        frame->sliceCount = 1;
-        frame->drawMode = 5;
-        frame->isMoveable = false;
-        frame->isInteractable = false;
-        frame->isVisible = false;
-        Overlay::Attach(parent, frame);
-        return frame;
+    void Build(Ring& ring, TLBSWidget* root, std::vector<Item> items) {
+        ring.items = std::move(items);
+        BuildPage(ring, root);
     }
 
     void PlaceHighlight(Ring& ring) {
@@ -321,26 +368,25 @@ namespace ControllerSupport::Radial {
             return;
         }
         constexpr int16_t Out = 6;
-        const Rect rect{static_cast<int16_t>(board->rect.left - Out), static_cast<int16_t>(board->rect.top - Out),
-                        static_cast<int16_t>(board->rect.right + Out), static_cast<int16_t>(board->rect.bottom + Out)};
-        const auto middleWidth = static_cast<uint16_t>(rect.right - rect.left - 16);
-        const auto middleHeight = static_cast<uint16_t>(rect.bottom - rect.top - 16);
-        ring.highlight->nineSliceInfo = {middleWidth, middleHeight, static_cast<uint16_t>(8 + middleWidth),
-                                         static_cast<uint16_t>(8 + middleHeight), 8, 8, 8, 8};
-        ring.highlight->rect = rect;
+        Overlay::PlaceFrame(ring.highlight, {static_cast<int16_t>(board->rect.left - Out), static_cast<int16_t>(board->rect.top - Out),
+                                             static_cast<int16_t>(board->rect.right + Out), static_cast<int16_t>(board->rect.bottom + Out)});
         ring.highlight->isVisible = true;
         ring.highlight->BubbleUp();
     }
 
     void ShowChoice(Ring& ring) {
         if (ring.shown == ring.choice) return;
-        for (int i = 0; i < static_cast<int>(ring.items.size()); i++) {
+        for (int i = 0; i < static_cast<int>(ring.boards.size()); i++) {
             if (i != ring.choice && i != ring.shown) continue;
-            if (ring.icons[i]) ring.icons[i]->imageData.atlasFrames[0] = i == ring.choice ? ring.items[i].hover : ring.items[i].frame;
+            if (i < ring.count && ring.icons[i]) {
+                const Item& item = ring.items[ring.first + i];
+                ring.icons[i]->imageData.atlasFrames[0] = i == ring.choice ? item.hover : item.frame;
+            }
             if (ring.boards[i]) ring.boards[i]->color = BoardColor(ring, i);
         }
-        if (ring.name) ring.name->SetText(ring.choice >= 0 ? ring.items[ring.choice].name.c_str() : L"");
-        if (ring.nameBoard && ring.nameBoard->isVisible != (ring.choice >= 0)) ring.nameBoard->isVisible = ring.choice >= 0;
+        const bool named = ring.choice >= 0 && ring.choice < ring.count;
+        if (ring.name) ring.name->SetText(named ? ring.items[ring.first + ring.choice].name.c_str() : L"");
+        if (ring.nameBoard && ring.nameBoard->isVisible != named) ring.nameBoard->isVisible = named;
         PlaceHighlight(ring);
         ring.shown = ring.choice;
     }
@@ -356,11 +402,8 @@ namespace ControllerSupport::Radial {
     std::vector<Item> GameItems() {
         std::vector<Item> items;
         for (const Entry& entry : Entries) {
-            Item item{entry.name, {}, entry.frame, entry.hover};
-            if (entry.where == TaskBarText) {
-                item.frame = item.hover = {};
-                item.label = entry.frame.topLeftX == 0 ? L"Settings" : L"Server";
-            }
+            Item item{entry.name, entry.label, entry.frame, entry.hover};
+            if (entry.where == Motion) item.motion = static_cast<int16_t>(entry.value);
             items.push_back(std::move(item));
         }
         return items;
@@ -392,14 +435,29 @@ namespace ControllerSupport::Radial {
         if (!down && ring.held) {
             ring.held = false;
             if (!open) return Step::Tapped;
-            picked = ring.choice >= 0 && now - ring.lastTilt < 200 ? ring.choice : -1;
+            picked = ring.choice >= 0 && ring.choice < ring.count && now - ring.lastTilt < 200 ? ring.first + ring.choice : -1;
             Close(ring);
             return Step::Picked;
         }
         if (!ring.held || (!open && now - ring.downTick < HoldTime)) return Step::Idle;
         if (!open) {
             if (&ring == &ClientRing) Build(ring, root, ClientItems());
-            else if (!ring.menu || ring.root != root) Build(ring, root, GameItems());
+            else if (!ring.menu || ring.root != root || ring.builtWidth != root->rect.right - root->rect.left
+                     || ring.builtHeight != root->rect.bottom - root->rect.top) {
+                Build(ring, root, GameItems());
+            }
+            if (!ring.menu) return Step::Idle;
+            ring.choice = -1;
+            ring.menu->isVisible = true;
+            ring.menu->BubbleUp();
+            ring.previous = buttons;
+        }
+        const WORD pressed = buttons & ~ring.previous;
+        ring.previous = buttons;
+        const int turn = (pressed & XINPUT_GAMEPAD_RIGHT_SHOULDER ? 1 : 0) - (pressed & XINPUT_GAMEPAD_LEFT_SHOULDER ? 1 : 0);
+        if (turn && Pages(ring) > 1) {
+            ring.page = (ring.page + turn + Pages(ring)) % Pages(ring);
+            BuildPage(ring, root);
             if (!ring.menu) return Step::Idle;
             ring.choice = -1;
             ring.menu->isVisible = true;
@@ -412,11 +470,12 @@ namespace ControllerSupport::Radial {
             x = rx;
             y = ry;
         }
-        const int count = static_cast<int>(ring.items.size());
-        if (count && x * x + y * y > 0.25f) {
+        const int spacing = Pages(ring) > 1 ? PageSize : ring.count;
+        if (ring.count && x * x + y * y > 0.25f) {
             float angle = std::atan2(x, y);
             if (angle < 0) angle += 6.2831853f;
-            ring.choice = static_cast<int>(std::lround(angle / 6.2831853f * count)) % count;
+            const int slot = static_cast<int>(std::lround(angle / 6.2831853f * spacing)) % spacing;
+            ring.choice = slot;
             ring.lastTilt = now;
         } else if (now - ring.lastTilt >= 200) {
             ring.choice = -1;
@@ -425,8 +484,46 @@ namespace ControllerSupport::Radial {
         return Step::Busy;
     }
 
+    void StartMotion(const int index) {
+        const int local = index - GameRing.first;
+        if (local < 0 || local >= GameRing.count || !GameRing.motions[local] || !GameRing.menu) return;
+        HWND window = FindGameWindow();
+        if (!window) return;
+        const Rect& r = GameRing.motions[local]->rect;
+        POINT cursor{};
+        GetCursorPos(&cursor);
+        ScreenToClient(window, &cursor);
+        Using = {true, 0, MAKELPARAM(GameRing.menu->rect.left + (r.left + r.right) / 2, GameRing.menu->rect.top + (r.top + r.bottom) / 2),
+                 MAKELPARAM(cursor.x, cursor.y)};
+        GameRing.menu->isVisible = true;
+    }
+
+    void StepMotion() {
+        if (!Using.active) return;
+        HWND window = FindGameWindow();
+        const bool doubleClicks = window && (GetClassLongA(window, GCL_STYLE) & CS_DBLCLKS) != 0;
+        switch (window ? Using.step++ : 3) {
+            case 0:
+                PostMessageA(window, WM_MOUSEMOVE, 0, Using.at);
+                break;
+            case 1:
+                PostMessageA(window, WM_LBUTTONDOWN, MK_LBUTTON, Using.at);
+                PostMessageA(window, WM_LBUTTONUP, 0, Using.at);
+                break;
+            case 2:
+                PostMessageA(window, doubleClicks ? WM_LBUTTONDBLCLK : WM_LBUTTONDOWN, MK_LBUTTON, Using.at);
+                PostMessageA(window, WM_LBUTTONUP, 0, Using.at);
+                break;
+            default:
+                if (window) PostMessageA(window, WM_MOUSEMOVE, 0, Using.back);
+                Using.active = false;
+                Close(GameRing);
+                break;
+        }
+    }
+
     bool IsOpen() {
-        return IsOpen(GameRing) || IsOpen(ClientRing);
+        return IsOpen(GameRing) || IsOpen(ClientRing) || Using.active;
     }
 
     // Until the window it opened shows, or the bar would flash in between.
@@ -455,7 +552,12 @@ namespace ControllerSupport::Radial {
         int picked = -1;
         if (inGame) {
             FollowUp(root);
+            if (Using.active) {
+                StepMotion();
+                return true;
+            }
         } else {
+            Using.active = false;
             // Server selection leaves the game, the menu shouldn't be seen on the way out.
             if (CloseTaskBar) HideTaskBar(root);
             CloseTaskBar = false;
@@ -472,7 +574,9 @@ namespace ControllerSupport::Radial {
                 pad.wButtons |= XINPUT_GAMEPAD_BACK;
                 return false;
             case Step::Picked:
-                if (picked >= 0) {
+                if (picked >= 0 && Entries[picked].where == Motion) {
+                    StartMotion(picked);
+                } else if (picked >= 0) {
                     Open(root, picked);
                     BarsHiddenUntil = GetTickCount() + 500;
                 }

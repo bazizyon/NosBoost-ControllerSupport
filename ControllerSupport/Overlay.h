@@ -27,6 +27,7 @@ namespace ControllerSupport::Overlay {
     constexpr int16_t BottomMargin = 112;
     constexpr int16_t EditRaise = 5;
     constexpr int16_t GlyphOffset = -8;
+    constexpr int16_t PanelSpill = 20;
     constexpr int16_t TextNudge = -1;
 
     struct Image {
@@ -52,6 +53,9 @@ namespace ControllerSupport::Overlay {
         {CrossGap / 2 - Step, 0, "XBOX_BUTTON_COLOR_X_SMALL"},
         {CrossGap / 2 + Step, 0, "XBOX_BUTTON_COLOR_B_SMALL"},
     };
+    constexpr WORD CellButtons[8] = {XINPUT_GAMEPAD_DPAD_UP, XINPUT_GAMEPAD_DPAD_DOWN, XINPUT_GAMEPAD_DPAD_LEFT,
+                                     XINPUT_GAMEPAD_DPAD_RIGHT, XINPUT_GAMEPAD_Y, XINPUT_GAMEPAD_A,
+                                     XINPUT_GAMEPAD_X, XINPUT_GAMEPAD_B};
 
     enum Action : uint8_t {
         NoAction, Attack, ClearTarget, NextTarget, PrevTarget, BossTarget, PickUp, Sit, Specialist,
@@ -109,6 +113,14 @@ namespace ControllerSupport::Overlay {
         TEWCustomPanelWidget* actionIcon = nullptr;
         TNTTimeAniIcon* icon = nullptr;
         TNTTimeAniIcon* source = nullptr;
+        TEWCustomPanelWidget* glow = nullptr;
+        TEWCustomPanelWidget* ripple = nullptr;
+        Rect glowBase{};
+        bool held = false;
+        float glowLevel = 0.0f;
+        DWORD pressTick = 0;
+        int16_t glowShown = -1;
+        int16_t rippleShown = -1;
         int16_t motion = 0;
         uintptr_t barRecord = 0;
         uintptr_t recast = 0;
@@ -152,6 +164,8 @@ namespace ControllerSupport::Overlay {
     inline bool ImagesLoaded = false;
 
     inline TLBSWidget* AttachedRoot = nullptr;
+    inline int16_t BuiltWidth = 0;
+    inline int16_t BuiltHeight = 0;
     inline Panel Panels[LayerCount];
 
     void LoadImages();
@@ -160,6 +174,9 @@ namespace ControllerSupport::Overlay {
     TEWLabel* AddLabel(TLBSWidget* parent, const int16_t x, const int16_t textY, const int16_t width,
                        const uint8_t alignment, const wchar_t* text);
     void SetLines(TEWLabel* const (&lines)[3], const wchar_t* text, const int16_t top);
+    TEWCustomPanelWidget* AddFrame(TLBSWidget* parent);
+    void PlaceFrame(TEWCustomPanelWidget* frame, const Rect& rect);
+    void UpdateGlow(int layer, const XINPUT_GAMEPAD& pad);
     void AddLines(TLBSWidget* parent, const int16_t x, const int16_t top, const int16_t width, const wchar_t* text);
     std::wstring OneLine(const wchar_t* text);
     TEWControlWidget* AddSprite(TLBSWidget* parent, const int image, const AtlasFrame& frame, const int16_t x,

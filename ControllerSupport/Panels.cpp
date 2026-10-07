@@ -60,6 +60,43 @@ namespace ControllerSupport::Overlay {
         return label;
     }
 
+    TEWCustomPanelWidget* AddFrame(TLBSWidget* parent) {
+        static Image image;
+        if (!image.id) image = Load("FRAME");
+        if (!image.id) return nullptr;
+        auto* frame = Widget::Create<TEWCustomPanelWidget>(CachedHost);
+        if (!frame) return nullptr;
+        constexpr int16_t C = 8;
+        const auto S = static_cast<int16_t>(image.width);
+        const auto M = static_cast<int16_t>(S - 2 * C);
+        delete[] frame->imageData.atlasFrames;
+        frame->imageData.imageName = image.id;
+        frame->imageData.imageWidth = S;
+        frame->imageData.imageHeight = static_cast<int16_t>(image.height);
+        frame->imageData.frameCount = 9;
+        frame->imageData.atlasFrames = new AtlasFrame[9]{
+            {C, C, M, M}, {0, 0, C, C}, {C, 0, M, C}, {static_cast<int16_t>(S - C), 0, C, C},
+            {static_cast<int16_t>(S - C), C, C, M}, {static_cast<int16_t>(S - C), static_cast<int16_t>(S - C), C, C},
+            {C, static_cast<int16_t>(S - C), M, C}, {0, static_cast<int16_t>(S - C), C, C}, {0, C, C, M},
+        };
+        frame->sliceCount = 1;
+        frame->drawMode = 5;
+        frame->isMoveable = false;
+        frame->isInteractable = false;
+        frame->isVisible = false;
+        Attach(parent, frame);
+        return frame;
+    }
+
+    void PlaceFrame(TEWCustomPanelWidget* frame, const Rect& rect) {
+        if (!frame) return;
+        const auto middleWidth = static_cast<uint16_t>(rect.right - rect.left - 16);
+        const auto middleHeight = static_cast<uint16_t>(rect.bottom - rect.top - 16);
+        frame->nineSliceInfo = {middleWidth, middleHeight, static_cast<uint16_t>(8 + middleWidth),
+                                static_cast<uint16_t>(8 + middleHeight), 8, 8, 8, 8};
+        frame->rect = rect;
+    }
+
     // Action names are up to three lines split on '\n', kept centred on where a single line would sit.
     constexpr int16_t LineHeight = 12;
 
@@ -198,10 +235,10 @@ namespace ControllerSupport::Overlay {
                const int16_t shift, const Binding (&bindings)[8]) {
         const int16_t centreX = static_cast<int16_t>((root->rect.right - root->rect.left) / 2 + shift);
         const int16_t centreY = static_cast<int16_t>(root->rect.bottom - root->rect.top - BottomMargin - lift);
-        const int16_t left = static_cast<int16_t>(centreX - CrossGap / 2 - Step - SlotSize / 2 + GlyphOffset);
-        const int16_t top = static_cast<int16_t>(centreY - Step - SlotSize / 2 + GlyphOffset);
-        const int16_t right = static_cast<int16_t>(centreX + CrossGap / 2 + Step + SlotSize / 2);
-        const int16_t bottom = static_cast<int16_t>(centreY + Step + SlotSize / 2);
+        const int16_t left = static_cast<int16_t>(centreX - CrossGap / 2 - Step - SlotSize / 2 + GlyphOffset - PanelSpill);
+        const int16_t top = static_cast<int16_t>(centreY - Step - SlotSize / 2 + GlyphOffset - PanelSpill);
+        const int16_t right = static_cast<int16_t>(centreX + CrossGap / 2 + Step + SlotSize / 2 + PanelSpill);
+        const int16_t bottom = static_cast<int16_t>(centreY + Step + SlotSize / 2 + PanelSpill);
         auto* container = Widget::Create<TLBSWidget>(CachedHost);
         if (!container) return;
         container->rect = {left, top, right, bottom};
@@ -242,6 +279,12 @@ namespace ControllerSupport::Overlay {
             ApplyBinding(slot, bindings[i]);
             AddImage(group, CellGlyphs[i], 0, 0);
         }
+        for (SlotView& slot : panel.slots) {
+            slot.glowBase = {static_cast<int16_t>(slot.rect.left - left), static_cast<int16_t>(slot.rect.top - top),
+                             static_cast<int16_t>(slot.rect.right - left), static_cast<int16_t>(slot.rect.bottom - top)};
+            slot.glow = AddFrame(container);
+            slot.ripple = AddFrame(container);
+        }
         if (title[1].id) {
             constexpr int16_t Half = 40;
             AddImage(container, title[0], static_cast<int16_t>(centreX - title[0].width / 2 - left),
@@ -276,6 +319,48 @@ namespace ControllerSupport::Overlay {
         if (panel.shown == shown || !panel.container) return;
         panel.shown = shown;
         panel.container->isVisible = shown;
+    }
+
+    void ShowFrame(TEWCustomPanelWidget* frame, const Rect& base, const int out, const int alpha, int16_t& shown) {
+        if (!frame) return;
+        const auto key = static_cast<int16_t>(alpha <= 0 ? 0 : out << 8 | alpha);
+        if (key == shown) return;
+        shown = key;
+        SetShown(frame, alpha > 0);
+        if (alpha <= 0) return;
+        PlaceFrame(frame, {static_cast<int16_t>(base.left - out), static_cast<int16_t>(base.top - out),
+                           static_cast<int16_t>(base.right + out), static_cast<int16_t>(base.bottom + out)});
+        frame->color = Color(static_cast<uint8_t>(alpha), 255, 255, 255);
+    }
+
+    void UpdateGlow(const int layer, const XINPUT_GAMEPAD& pad) {
+        constexpr float FadeIn = 70.0f, FadeOut = 220.0f;
+        constexpr DWORD RippleTime = 320;
+        static DWORD last = GetTickCount();
+        const DWORD now = GetTickCount();
+        const auto elapsed = static_cast<float>(std::min<DWORD>(now - last, 100));
+        last = now;
+        for (int l = 0; l < LayerCount; l++) {
+            for (int i = 0; i < 8; i++) {
+                SlotView& slot = Panels[l].slots[i];
+                const bool held = l == layer && (pad.wButtons & CellButtons[i]);
+                if (held && !slot.held) slot.pressTick = now;
+                slot.held = held;
+                slot.glowLevel = held ? std::min(1.0f, slot.glowLevel + elapsed / FadeIn) : std::max(0.0f, slot.glowLevel - elapsed / FadeOut);
+                if (l != layer) slot.glowLevel = 0.0f;
+                ShowFrame(slot.glow, slot.glowBase, 4, static_cast<int>(slot.glowLevel * 15) * 17, slot.glowShown);
+                const DWORD age = now - slot.pressTick;
+                if (l == layer && slot.pressTick && age < RippleTime) {
+                    const float p = static_cast<float>(age) / RippleTime;
+                    const float eased = 1.0f - (1.0f - p) * (1.0f - p);
+                    ShowFrame(slot.ripple, slot.glowBase, 4 + static_cast<int>(eased * 14), static_cast<int>((1.0f - p) * 15) * 15,
+                              slot.rippleShown);
+                } else {
+                    slot.pressTick = 0;
+                    ShowFrame(slot.ripple, slot.glowBase, 0, 0, slot.rippleShown);
+                }
+            }
+        }
     }
 
     void Destroy(Panel& panel) {

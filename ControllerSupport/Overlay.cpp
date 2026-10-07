@@ -24,7 +24,11 @@ namespace ControllerSupport::Overlay {
 
     void Update(TLBSWidget* root, const bool padActive, const XINPUT_GAMEPAD& pad, const int32_t mouseX, const int32_t mouseY) {
         if (!root || !root->childrenList) return;
-        if (root != AttachedRoot || EditMode != AppliedEditMode) {
+        const auto width = static_cast<int16_t>(root->rect.right - root->rect.left);
+        const auto height = static_cast<int16_t>(root->rect.bottom - root->rect.top);
+        if (root != AttachedRoot || EditMode != AppliedEditMode || width != BuiltWidth || height != BuiltHeight) {
+            BuiltWidth = width;
+            BuiltHeight = height;
             DestroyHint();
             LoadImages();
             DestroyPalette();
@@ -46,7 +50,7 @@ namespace ControllerSupport::Overlay {
                 for (const Panel& panel : Panels) {
                     if (panel.container) right = std::max(right, panel.container->rect.right);
                 }
-                BuildPalette(root, right);
+                BuildPalette(root, static_cast<int16_t>(right - PanelSpill));
                 BuildEditBoard(root);
             }
         }
@@ -69,6 +73,7 @@ namespace ControllerSupport::Overlay {
         int shown = padActive ? ActiveLayer(pad) : -1;
         if (Casting.active) shown = Casting.layer;
         for (int layer = 0; layer < LayerCount; layer++) Show(Panels[layer], layer == shown, Bindings[layer]);
+        UpdateGlow(shown, pad);
     }
 
     void HideAll(TLBSWidget* root) {

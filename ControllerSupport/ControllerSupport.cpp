@@ -100,12 +100,9 @@ namespace ControllerSupport {
         const WORD buttons = PadState.Gamepad.wButtons;
         const WORD pressed = buttons & ~PreviousButtons;
         PreviousButtons = buttons;
-        constexpr WORD CellButtons[8] = {XINPUT_GAMEPAD_DPAD_UP, XINPUT_GAMEPAD_DPAD_DOWN, XINPUT_GAMEPAD_DPAD_LEFT,
-                                         XINPUT_GAMEPAD_DPAD_RIGHT, XINPUT_GAMEPAD_Y, XINPUT_GAMEPAD_A,
-                                         XINPUT_GAMEPAD_X, XINPUT_GAMEPAD_B};
         const int layer = Overlay::ActiveLayer(PadState.Gamepad);
         for (int cell = 0; cell < 8; cell++) {
-            if (!(pressed & CellButtons[cell])) continue;
+            if (!(pressed & Overlay::CellButtons[cell])) continue;
             const Overlay::Binding& binding = Overlay::Bindings[layer][cell];
             if (!binding.set) continue;
             if (!binding.action || Overlay::IsBarSkill(binding.action)) {
