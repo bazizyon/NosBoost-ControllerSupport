@@ -336,7 +336,8 @@ namespace ControllerSupport::Navigator {
         {{"XBOX_DPAD_SMALL", "XBOX_STICK_L_SMALL"}, L"Move", 32}, {{"XBOX_STICK_R_SMALL", nullptr}, L"Cursor", 36},
         {{"XBOX_BUTTON_COLOR_A_SMALL", nullptr}, L"Left click", 51}, {{"XBOX_BUTTON_COLOR_B_SMALL", nullptr}, L"Escape", 40},
         {{"XBOX_BUTTON_COLOR_X_SMALL", nullptr}, L"Right click", 56}, {{"XBOX_BUTTON_COLOR_Y_SMALL", nullptr}, L"Enter", 32},
-        {{"XBOX_LB_SMALL", "XBOX_RB_SMALL"}, L"Switch", 39}, {{"XBOX_BUTTON_VIEW_SMALL", nullptr}, L"Exit", 22},
+        {{"XBOX_LB_SMALL", "XBOX_RB_SMALL"}, L"Switch", 39}, {{"XBOX_BUTTON_MENU_SMALL", nullptr}, L"Keyboard", 54},
+        {{"XBOX_BUTTON_VIEW_SMALL", nullptr}, L"Exit", 22},
     };
     Overlay::Image HintGlyphs[std::size(Hints)][2];
 

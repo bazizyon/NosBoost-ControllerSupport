@@ -7,6 +7,7 @@
 #include "Navigator.h"
 #include "Radial.h"
 #include "Clients.h"
+#include "Keyboard.h"
 #include "imgui_internal.h"
 
 namespace ControllerSupport {
@@ -76,6 +77,31 @@ namespace ControllerSupport {
         TalkTo(npc);
     }
 
+    char Commands[2][128]{};
+    std::string CommandsFor;
+
+    void LoadCommands() {
+        if (Overlay::CharacterName == CommandsFor) return;
+        CommandsFor = Overlay::CharacterName;
+        const std::string section = "Commands." + CommandsFor, path = Overlay::IniPath();
+        for (int i = 0; i < 2; i++) {
+            GetPrivateProfileStringA(section.c_str(), ("C" + std::to_string(i + 1)).c_str(), "", Commands[i], sizeof(Commands[i]), path.c_str());
+        }
+    }
+
+    void SaveCommand(const int i) {
+        if (CommandsFor.empty()) return;
+        WritePrivateProfileStringA(("Commands." + CommandsFor).c_str(), ("C" + std::to_string(i + 1)).c_str(), Commands[i],
+                                   Overlay::IniPath().c_str());
+    }
+
+    void SendCommand(const int i) {
+        LoadCommands();
+        wchar_t text[128]{};
+        MultiByteToWideChar(CP_UTF8, 0, Commands[i], -1, text, 127);
+        Keyboard::SendChat(text);
+    }
+
     void RunAction(const uint8_t action, const TLBSWidget* root) {
         switch (action) {
             case Overlay::Attack: PressKey(VK_SPACE); PauseMovement(); break;
@@ -92,6 +118,8 @@ namespace ControllerSupport {
             case Overlay::Chat: PressKey(VK_RETURN); break;
             case Overlay::ModsMenu: PressKey(VK_F9); break;
             case Overlay::TalkToNpc: TalkToNearestNpc(); break;
+            case Overlay::ChatCommand1: SendCommand(0); break;
+            case Overlay::ChatCommand2: SendCommand(1); break;
             default: break;
         }
     }
@@ -240,6 +268,7 @@ extern "C" {
         Overlay::AttachedRoot = nullptr;
         Navigator::Destroy();
         Radial::Destroy();
+        Keyboard::Destroy();
         Clients::Withdraw();
         Overlay::DestroyHint();
     }
@@ -256,6 +285,7 @@ extern "C" {
             PendingKey = 0;
         }
 
+        if (GameFocused()) Keyboard::Pump(const_cast<TLBSWidget*>(RootWidget));
         PadState = {};
         PadResult = getState ? getState(0, &PadState) : ERROR_DEVICE_NOT_CONNECTED;
         // Another window or another client has the focus, the gamepad isn't ours then.
@@ -272,7 +302,7 @@ extern "C" {
         const TSceneManager* scene = GetSceneManager();
         const bool inGame = tickContext.isPlayerLoaded && scene && scene->mapPlayerObjPtr;
         if (inGame) {
-            Overlay::Update(const_cast<TLBSWidget*>(RootWidget), PadIsActive && !Navigator::Window && !Radial::HidesBars() && !ImGuiFocused, PadState.Gamepad,
+            Overlay::Update(const_cast<TLBSWidget*>(RootWidget), PadIsActive && !Navigator::Window && !Radial::HidesBars() && !ImGuiFocused && !Keyboard::IsOpen(), PadState.Gamepad,
                             tickContext.mouseX, tickContext.mouseY);
         } else {
             Overlay::HideAll(const_cast<TLBSWidget*>(RootWidget));
@@ -281,6 +311,10 @@ extern "C" {
         if (PadResult != ERROR_SUCCESS) Radial::Hide(RootWidget);
         if (PadResult != ERROR_SUCCESS) {
             Navigator::Close(false);
+            return;
+        }
+        if (Keyboard::Update(const_cast<TLBSWidget*>(RootWidget), PadState.Gamepad, PadIsActive)) {
+            PreviousButtons = PadState.Gamepad.wButtons;
             return;
         }
         // View closes the mods menu, or hands a focused mod window back to the game.
@@ -379,83 +413,11 @@ extern "C" {
     __declspec(dllexport) void ModTick(const TLBSWidget* RootWidget, const TickContext tickContext) {
         UpdateImGuiFocus();
         if (WindowVisible) {
-            ImGui::Begin("Gamepad Debug");
-            ImGui::Text("RotateBy: %s", rotateByFunction ? "found" : "NOT FOUND");
-            ImGui::Text("Input: %s, walk target global: %s", PadIsActive ? "gamepad" : "keyboard/mouse",
-                        walkTargetGlobal ? "found" : "NOT FOUND");
-            ImGui::Text("Stop action: %s", stopActionFunction ? "found" : "NOT FOUND");
-            ImGui::Text("Select by id: %s, cycle %u/%u", selectByIdFunction ? "found" : "NOT FOUND",
-                        static_cast<unsigned>(TargetHistory.empty() ? 0 : HistoryIndex + 1),
-                        static_cast<unsigned>(TargetHistory.size()));
-            ImGui::Text("Pets follow: %s, TNaviWidget: %s", petsFollowFunction ? "found" : "NOT FOUND", naviWidget ? "found" : "not found");
-            ImGui::SliderFloat("Camera speed", &HorizontalCameraSpeed, 0.5f, 6.0f);
-            ImGui::SliderFloat("Vertical speed", &VerticalCameraSpeed, 0.2f, 3.0f);
-            ImGui::Checkbox("Invert horizontal", &InvertHorizontalCamera);
-            ImGui::Checkbox("Invert vertical", &InvertVerticalCamera);
-            ImGui::Checkbox("Direct camera", &DirectCamera);
+            ImGui::Begin("Gamepad");
             ImGui::Checkbox("Edit gamepad bars (drag skills onto the slots)", &Overlay::EditMode);
-            ImGui::SliderFloat("Stick pause after action (s)", &ActionMovementPause, 0.0f, 1.0f);
-            ImGui::Checkbox("Old movement", &OldMovement);
-            if (!OldMovement) {
-                ImGui::Checkbox("Stop where the stick is let go", &StopOnRelease);
-                ImGui::SliderFloat("Cells ahead", &Lookahead, 1.0f, 9.0f, "%.0f");
-                ImGui::SliderFloat("Light tilt below (1 cell steps)", &FineTilt, 0.0f, 1.0f);
-            }
-            if (ImGui::Button("Press Space (test)")) {
-                PendingKey = VK_SPACE;
-            }
-            ImGui::SameLine();
-            ImGui::Text("last sent to: %s", LastKeyWindowClass);
-            ImGui::Separator();
-            ImGui::Text("Camera yaw: %.3f  forward yaw: %.3f", CameraYaw(), ForwardYaw);
-            ImGui::Checkbox("Camera-relative movement", &CameraRelativeMovement);
-            if (ImGui::Button("Use current camera as forward")) {
-                ForwardYaw = CameraYaw();
-            }
-            ImGui::Checkbox("Flip movement rotation", &FlipMovementRotation);
-            ImGui::Separator();
-            if (PadResult == ERROR_SUCCESS) {
-                ImGui::Text("Connected");
-
-                ImGui::Text("Left Stick");
-                ImGui::Text("X: %d", PadState.Gamepad.sThumbLX);
-                ImGui::Text("Y: %d", PadState.Gamepad.sThumbLY);
-
-                ImGui::Separator();
-
-                ImGui::Text("Right Stick");
-                ImGui::Text("X: %d", PadState.Gamepad.sThumbRX);
-                ImGui::Text("Y: %d", PadState.Gamepad.sThumbRY);
-
-                ImGui::Separator();
-
-                ImGui::Text("Triggers");
-                ImGui::Text("LT: %u", PadState.Gamepad.bLeftTrigger);
-                ImGui::Text("RT: %u", PadState.Gamepad.bRightTrigger);
-
-                ImGui::Separator();
-
-                ImGui::Text("Bumpers");
-                ImGui::Text("LB: %s", PadState.Gamepad.wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER ? "Pressed" : "Released");
-                ImGui::Text("RB: %s", PadState.Gamepad.wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER ? "Pressed" : "Released");
-
-                ImGui::Separator();
-
-                ImGui::Text("Buttons");
-
-                ImGui::Text("A: %s",
-                    (PadState.Gamepad.wButtons & XINPUT_GAMEPAD_A) ? "Pressed" : "Released");
-
-                ImGui::Text("B: %s",
-                    (PadState.Gamepad.wButtons & XINPUT_GAMEPAD_B) ? "Pressed" : "Released");
-
-                ImGui::Text("X: %s",
-                    (PadState.Gamepad.wButtons & XINPUT_GAMEPAD_X) ? "Pressed" : "Released");
-
-                ImGui::Text("Y: %s",
-                    (PadState.Gamepad.wButtons & XINPUT_GAMEPAD_Y) ? "Pressed" : "Released");
-            } else {
-                ImGui::Text("No controller connected");
+            LoadCommands();
+            for (int i = 0; i < 2; i++) {
+                if (ImGui::InputText(i ? "Chat command 2" : "Chat command 1", Commands[i], sizeof(Commands[i]))) SaveCommand(i);
             }
             ImGui::End();
         }

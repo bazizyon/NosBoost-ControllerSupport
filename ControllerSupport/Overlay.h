@@ -60,7 +60,7 @@ namespace ControllerSupport::Overlay {
     enum Action : uint8_t {
         NoAction, Attack, ClearTarget, NextTarget, PrevTarget, BossTarget, PickUp, Sit, Specialist,
         PartnerSpecialist, PetsFollow, PetsStop, Chat, PetSkill1, PetSkill2, PetSkill3, PartnerSkill1, PartnerSkill2,
-        PartnerSkill3, Linker1, Linker2, Linker3, Linker4, Linker5, TalkToNpc, ModsMenu, ActionCount
+        PartnerSkill3, Linker1, Linker2, Linker3, Linker4, Linker5, TalkToNpc, ModsMenu, ChatCommand1, ChatCommand2, ActionCount
     };
     struct ActionLook {
         const wchar_t* text;
@@ -95,6 +95,8 @@ namespace ControllerSupport::Overlay {
         {L"Linker 5", nullptr, 0, L""},
         {L"Talk to\nNPC or\nTS stone", nullptr, 0, L""},
         {L"Open\nmods\nmenu", nullptr, 0, L""},
+        {L"Chat\ncommand\n1", nullptr, 0, L""},
+        {L"Chat\ncommand\n2", nullptr, 0, L""},
     };
 
     // The linker slots only belong on the fixed LT+RB layer.

@@ -3,6 +3,7 @@
 #include "Navigator.h"
 #include "Radial.h"
 #include "Clients.h"
+#include "Keyboard.h"
 
 namespace ControllerSupport::Radial {
     // The game's interface atlas, the task bar icons have their hover look one row below.
@@ -597,6 +598,9 @@ namespace ControllerSupport::Radial {
             StartSettle();
             return true;
         case Step::Busy:
+            return true;
+        case Step::Tapped:
+            Keyboard::Toggle();
             return true;
         default:
             return false;

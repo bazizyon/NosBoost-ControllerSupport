@@ -45,6 +45,7 @@ add_library(ControllerSupport SHARED
         ControllerSupport/LinkerHint.cpp
         ControllerSupport/Radial.cpp
         ControllerSupport/Clients.cpp
+        ControllerSupport/Keyboard.cpp
         ControllerSupport/resources.rc
         ${nosboost_modkit_SOURCE_DIR}/WidgetKit/WidgetKit.cpp
         ${imgui_SOURCE_DIR}/imgui.cpp
